@@ -56,7 +56,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="space-y-4 border-t border-line bg-accent-soft/50 p-6 md:border-l md:border-t-0 md:p-8">
+        <div className="space-y-4 bg-gradient-to-br from-[#ff9a56] to-[#ff5e7a] p-6 text-white md:p-8">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="good">Recommended for you</Badge>
             <Badge>{rec.module.level}</Badge>
@@ -64,12 +64,12 @@ export default function DashboardPage() {
           </div>
           <div>
             <h2 className="text-2xl font-extrabold leading-tight tracking-tight md:text-[1.7rem]">{rec.module.title}</h2>
-            <p className="mt-1.5 text-muted">{rec.module.summary}</p>
-            <p className="mt-2 text-sm text-muted">{rec.reason}</p>
+            <p className="mt-1.5 text-white/95">{rec.module.summary}</p>
+            <p className="mt-2 text-sm text-white/90">{rec.reason}</p>
           </div>
 
           <ol className="grid gap-2 sm:grid-cols-2" aria-label="What a session includes">
-            <li className="flex items-center gap-3 rounded-xl bg-surface px-3 py-2.5 text-sm shadow-sm">
+            <li className="flex items-center gap-3 rounded-2xl bg-surface px-3 py-2.5 text-sm text-ink shadow-sm">
               <IconChip>
                 <BookOpenText size={20} weight="duotone" />
               </IconChip>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
                 <span className="text-muted">Read the passage out loud</span>
               </span>
             </li>
-            <li className="flex items-center gap-3 rounded-xl bg-surface px-3 py-2.5 text-sm shadow-sm">
+            <li className="flex items-center gap-3 rounded-2xl bg-surface px-3 py-2.5 text-sm text-ink shadow-sm">
               <IconChip>
                 <ChatsCircle size={20} weight="duotone" />
               </IconChip>

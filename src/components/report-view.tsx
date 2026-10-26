@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BookOpenText, Camera, ChatCircleText, ChatsCircle, CheckCircle, DownloadSimple, FilePdf, Info, Target, TrendUp, XCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowRight, BookOpenText, Camera, ChatCircleText, ChatsCircle, CheckCircle, DownloadSimple, FilePdf, Info, Target, TrendUp, XCircle } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -9,9 +9,10 @@ import { getField, getGoal } from "@/features/content/fields";
 import { getModule } from "@/features/content/modules";
 import { recommendNext } from "@/features/progress/stats";
 import type { CoachingItem } from "@/features/session/types";
-import { paceLabel } from "@/features/speech/metrics";
+import { countWords, paceLabel } from "@/features/speech/metrics";
 import { buildReportDocument, documentToText, downloadFile, renderPdf, reportFileName } from "@/features/report/export";
-import { deleteSession } from "@/services/storage";
+import { requestReport } from "@/services/coach-api";
+import { deleteSession, saveSession } from "@/services/storage";
 import { useHydrated, useProfile, useSessions } from "@/services/use-storage";
 
 function Section({ title, subtitle, tag, icon, children }: { title: string; subtitle?: string; tag?: ReactNode; icon?: ReactNode; children: ReactNode }) {
@@ -120,6 +121,8 @@ export function ReportView({ sessionId }: { sessionId: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState<"pdf" | "txt" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryNote, setRetryNote] = useState<string | null>(null);
 
   if (!hydrated || !profile) return null;
   const s = sessions.find((x) => x.id === sessionId);
@@ -167,6 +170,39 @@ export function ReportView({ sessionId }: { sessionId: string }) {
 
   const sayItBetter = s.report.sayItBetter ?? [];
 
+  /** The written feedback can fail (network, busy AI service). The saved answers are enough to ask again. */
+  const canRetryAi =
+    !ai &&
+    m !== undefined &&
+    s.transcriptKept &&
+    !/Development mode/.test(s.report.aiUnavailableReason ?? "") &&
+    s.turns.some((t) => t.role === "student" && t.text.trim());
+
+  async function retryAi() {
+    if (!m) return;
+    setRetrying(true);
+    setRetryNote(null);
+    const res = await requestReport({
+      moduleId: s!.moduleId,
+      goal: s!.goal,
+      level: s!.level,
+      ageBand: profile!.ageBand,
+      turns: s!.turns.slice(0, 60).map((t) => ({ role: t.role, text: t.text.slice(0, 2000), inputMode: t.inputMode })),
+      speech: s!.speech,
+      readingAloud: s!.reading.aloud,
+      readingMode: s!.reading.mode,
+      readingSec: s!.readingSec,
+      passageWords: countWords(m.passage),
+    });
+    if (res.ai) {
+      const better = res.ai.sayItBetter?.length ? res.ai.sayItBetter.map((x) => ({ ...x, source: "ai" as const })) : s!.report.sayItBetter;
+      saveSession({ ...s!, report: { ...s!.report, ai: res.ai, generatedBy: "ai", model: res.model, aiUnavailableReason: undefined, sayItBetter: better } });
+    } else {
+      setRetryNote(res.reason ?? "The written feedback could not be generated this time.");
+    }
+    setRetrying(false);
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -209,6 +245,14 @@ export function ReportView({ sessionId }: { sessionId: string }) {
       ) : (
         <Notice tone="warn" title="AI-written feedback is not available for this session">
           {s.report.aiUnavailableReason ?? "The written feedback could not be generated."} The coaching below is still based on what you actually said and did.
+          {canRetryAi && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button variant="secondary" icon={<ArrowClockwise size={18} aria-hidden />} onClick={() => void retryAi()} disabled={retrying}>
+                {retrying ? "Writing your feedback..." : "Try again"}
+              </Button>
+              {retryNote && <span role="status">{retryNote}</span>}
+            </div>
+          )}
         </Notice>
       )}
 

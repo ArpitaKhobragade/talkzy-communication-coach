@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="sticky top-0 z-20 border-b border-line bg-paper/90 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 md:px-8">
             <Link href="/" className="flex items-center gap-2.5 font-extrabold tracking-tight">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-white shadow-sm" aria-hidden>
+              <span className="grid h-9 w-9 place-items-center rounded-[50%_50%_50%_8px] bg-gradient-to-br from-[#ff9a56] to-[#ff5e7a] text-white shadow-sm" aria-hidden>
                 <Microphone size={20} weight="fill" />
               </span>
               <span className="whitespace-nowrap text-[1.05rem]">Talkzy</span>
@@ -55,8 +55,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       key={href}
                       href={href}
                       aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
-                        active ? "bg-accent-soft text-accent-ink" : "text-muted hover:bg-white hover:text-ink"
+                      className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+                        active ? "bg-ink text-white" : "text-muted hover:bg-white hover:text-ink"
                       }`}
                     >
                       {/* Icons only from the large breakpoint up, so the labels fit on a tablet. */}
