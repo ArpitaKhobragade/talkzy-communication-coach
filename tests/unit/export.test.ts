@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import { buildReportDocument, documentToText, pdfSafe, renderPdf, reportFileName, type DocBlock, type ReportContext } from "@/features/report/export";
+import { buildSession } from "@/features/practice/finalize";
+import type { Turn, VisionMetrics } from "@/features/session/types";
+
+const turn = (role: Turn["role"], text: string, extra: Partial<Turn> = {}): Turn => ({ id: Math.random().toString(), role, text, at: 0, ...extra });
+
+const vision: VisionMetrics = {
+  framesAnalyzed: 120, durationSec: 60, facePresentPct: 92, cameraFacingPct: 64, avgHeadYawDeg: 12, avgHeadPitchDeg: 8,
+  shoulderTiltDeg: 3, uprightPct: 78, bodyVisiblePct: 90, handsVisiblePct: 40, movementIndex: 0.04, movementLevel: "moderate",
+  facialMovementIndex: 0.005, facialMovementLevel: "low",
+};
+
+const session = (over: { keepTranscript?: boolean; withVision?: boolean } = {}) =>
+  buildSession({
+    id: "s1",
+    startedAt: new Date(2026, 9, 26, 10, 30).getTime(),
+    endedAt: new Date(2026, 9, 26, 10, 41).getTime(),
+    budgetSec: 720,
+    moduleId: "computer-science-intermediate",
+    field: "computer-science",
+    level: "intermediate",
+    goal: "clarity",
+    liveAi: false,
+    readingSec: 100,
+    passageWords: 160,
+    reading: { mode: "aloud", durationSec: 100, aloud: { accuracyPct: 82, coveragePct: 95, wpm: 140, spokenWordCount: 140, missedWords: ["passphrase", "authentication"] } },
+    turns: [
+      turn("coach", "Why are long passwords better?"),
+      turn("student", "um I think basically a long password is harder to guess because it has more combinations you know", { inputMode: "voice", speakingSec: 9, pauseCount: 1, longestPauseSec: 1.4, latencySec: 2 }),
+      turn("coach", "Can you give an example?"),
+      turn("student", "Passwords keep accounts safe", { inputMode: "voice", speakingSec: 3, pauseCount: 0, longestPauseSec: 0, latencySec: 2.2 }),
+    ],
+    vision: over.withVision === false ? null : vision,
+    keepTranscript: over.keepTranscript ?? true,
+    ai: null,
+    aiReason: "Development mode: no AI key.",
+  });
+
+const ctx: ReportContext = {
+  displayName: "Asha",
+  moduleTitle: "Strong Passwords and Staying Safe Online",
+  fieldName: "Computer Science & Technology",
+  goalName: "Explain ideas clearly",
+  next: { title: "How a Startup Tests a New Idea", level: "intermediate", reason: "Keep the habit going." },
+};
+
+const headings = (blocks: DocBlock[]) => blocks.filter((b) => b.t === "h2").map((b) => (b as { text: string }).text);
+
+describe("buildReportDocument", () => {
+  it("has the three sections the student asked for, then practice and numbers", () => {
+    const h = headings(buildReportDocument(session(), ctx));
+    expect(h.slice(0, 3)).toEqual(["1. How you did while reading", "2. How you did while answering", "3. Camera: your face and body"]);
+    expect(h).toContain("Practise before your next session");
+    expect(h).toContain("Your numbers");
+  });
+
+  it("says what went well, what to fix and how to fix it, in each section", () => {
+    const text = documentToText(buildReportDocument(session(), ctx));
+    expect(text).toMatch(/What went well:/);
+    expect(text).toMatch(/What to fix:/);
+    expect(text).toMatch(/How to fix it:/);
+    expect(text).toMatch(/Looking at the camera/);
+    expect(text).toMatch(/Your face while talking/);
+  });
+
+  it("includes 'instead of this, say it like this' from the student's own words", () => {
+    const blocks = buildReportDocument(session(), ctx);
+    const cmp = blocks.filter((b) => b.t === "compare") as Extract<DocBlock, { t: "compare" }>[];
+    expect(cmp.length).toBeGreaterThanOrEqual(2);
+    expect(cmp[0].said).toContain("um I think basically");
+    expect(cmp[0].better).toBe("I think a long password is harder to guess because it has more combinations.");
+    expect(documentToText(blocks)).toMatch(/Say it like this:/);
+  });
+
+  it("is honest when the camera was off, and keeps the no-feelings note when it was on", () => {
+    expect(documentToText(buildReportDocument(session({ withVision: false }), ctx))).toMatch(/camera was off/);
+    expect(documentToText(buildReportDocument(session(), ctx))).toMatch(/says nothing about how you feel/);
+  });
+
+  it("includes the transcript only when it was kept", () => {
+    expect(documentToText(buildReportDocument(session({ keepTranscript: true }), ctx))).toMatch(/what was said/i);
+    expect(documentToText(buildReportDocument(session({ keepTranscript: false }), ctx))).not.toMatch(/what was said/i);
+  });
+
+  it("explains why AI feedback is missing and names the student and topic", () => {
+    const text = documentToText(buildReportDocument(session(), ctx));
+    expect(text).toMatch(/Development mode: no AI key\./);
+    expect(text).toContain("Asha");
+    expect(text).toContain("Strong Passwords and Staying Safe Online");
+  });
+});
+
+describe("pdfSafe and file name", () => {
+  it("replaces symbols the PDF font cannot draw", () => {
+    expect(pdfSafe("It’s “good” – really… a · b")).toBe("It's \"good\" - really... a - b");
+    expect(pdfSafe("snow ☃ man")).toBe("snow  man");
+  });
+  it("makes a dated file name", () => {
+    expect(reportFileName(new Date(2026, 9, 5).getTime(), "pdf")).toBe("talkzy-report-2026-10-05.pdf");
+    expect(reportFileName(new Date(2026, 9, 5).getTime(), "txt")).toMatch(/\.txt$/);
+  });
+});
+
+describe("renderPdf", () => {
+  it("produces a real PDF file", async () => {
+    const bytes = new Uint8Array(await renderPdf(buildReportDocument(session(), ctx)));
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
+    expect(bytes.length).toBeGreaterThan(2000);
+  });
+
+  it("adds pages for long content and numbers them", async () => {
+    const many: DocBlock[] = [{ t: "title", text: "Long report" }];
+    for (let i = 0; i < 80; i++) many.push({ t: "bullet", text: `Item ${i}: ${"word ".repeat(40)}`, how: "Do this." });
+    const raw = new TextDecoder("latin1").decode(new Uint8Array(await renderPdf(many)));
+    const pages = (raw.match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+    expect(pages).toBeGreaterThan(2);
+  });
+
+  it("handles unusual characters without throwing", async () => {
+    const bytes = await renderPdf([{ t: "title", text: "Résumé ✓" }, { t: "p", text: "Quote “x” — done ☃" }]);
+    expect(bytes.byteLength).toBeGreaterThan(500);
+  });
+});

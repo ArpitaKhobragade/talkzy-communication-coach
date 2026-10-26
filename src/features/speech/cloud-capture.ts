@@ -1,0 +1,154 @@
+// Browser-only. Captures ONE spoken answer with Silero VAD + Sarvam speech-to-text.
+// Half-duplex: call begin() only after the coach has finished speaking.
+import type { CaptureResult, TurnCaptureLike, TurnCaptureOptions } from "./capture";
+import { encodeWav16, splitForStt, STT_SAMPLE_RATE, timingFromSpans, type SpeechSpan } from "./segments";
+import type { VadSegment, VadSession } from "./vad-session";
+
+const MIN_PIECE_SAMPLES = Math.round(0.3 * STT_SAMPLE_RATE);
+const STT_TIMEOUT_MS = 20_000;
+/** Give up on the flushed final segment after this long when ending an answer. */
+const END_WAIT_MS = 15_000;
+/** Two failed segments in a row means cloud recognition is not working right now. */
+const MAX_CONSECUTIVE_FAILURES = 2;
+
+async function transcribe(audio: Float32Array, moduleId: string): Promise<string> {
+  const texts: string[] = [];
+  for (const piece of splitForStt(audio)) {
+    if (piece.length < MIN_PIECE_SAMPLES) continue;
+    const res = await fetch(`/api/voice/stt?module=${encodeURIComponent(moduleId)}`, {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: encodeWav16(piece),
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`stt_${res.status}`);
+    const data = (await res.json()) as { text?: string };
+    if (data.text) texts.push(data.text.trim());
+  }
+  return texts.join(" ").trim();
+}
+
+export class CloudTurnCapture implements TurnCaptureLike {
+  private spans: SpeechSpan[] = [];
+  private parts: string[] = [];
+  private pending = 0;
+  private speaking = false;
+  private lastActivity = 0;
+  private turnStart = 0;
+  private failures = 0;
+  private fatalRaised = false;
+  active = false;
+
+  constructor(
+    private readonly vad: VadSession,
+    private readonly moduleId: string,
+    private readonly opts: TurnCaptureOptions,
+  ) {}
+
+  get isActive(): boolean {
+    return this.active;
+  }
+
+  begin(): void {
+    this.spans = [];
+    this.parts = [];
+    this.pending = 0;
+    this.speaking = false;
+    this.failures = 0;
+    this.fatalRaised = false;
+    this.active = true;
+    this.turnStart = performance.now();
+    this.lastActivity = this.turnStart;
+
+    this.vad.setListener({
+      onSpeechStart: () => {
+        this.speaking = true;
+        this.lastActivity = performance.now();
+      },
+      onSegment: (seg) => this.handleSegment(seg),
+      onLevel: (p) => this.opts.onLevel?.(p),
+    });
+    this.vad.start().catch(() => {
+      this.active = false;
+      this.opts.onFatal("vad");
+    });
+  }
+
+  private emitInterim() {
+    const text = this.currentText();
+    this.opts.onInterim(this.pending > 0 ? `${text} ...`.trim() : text);
+  }
+
+  private handleSegment(seg: VadSegment) {
+    this.speaking = false;
+    this.lastActivity = performance.now();
+    this.spans.push({ startMs: seg.startMs, endMs: seg.endMs });
+
+    const index = this.parts.length;
+    this.parts.push("");
+    this.pending++;
+    this.emitInterim();
+
+    const run = async () => {
+      try {
+        return await transcribe(seg.audio, this.moduleId);
+      } catch {
+        return await transcribe(seg.audio, this.moduleId); // one retry for a transient failure
+      }
+    };
+    run()
+      .then((text) => {
+        this.parts[index] = text;
+        this.failures = 0;
+      })
+      .catch(() => {
+        this.failures++;
+        if (this.failures >= MAX_CONSECUTIVE_FAILURES && !this.fatalRaised) {
+          this.fatalRaised = true;
+          this.opts.onFatal("cloud-stt");
+        }
+      })
+      .finally(() => {
+        this.pending--;
+        this.lastActivity = performance.now();
+        this.emitInterim();
+      });
+  }
+
+  currentText(): string {
+    return this.parts.filter(Boolean).join(" ").trim();
+  }
+
+  hasText(): boolean {
+    return this.currentText().length > 0;
+  }
+
+  idleMs(): number {
+    return this.speaking ? 0 : performance.now() - this.lastActivity;
+  }
+
+  isBusy(): boolean {
+    return this.pending > 0;
+  }
+
+  async end(): Promise<CaptureResult> {
+    try {
+      await this.vad.pause(); // flushes speech that is still in progress
+    } catch {
+      /* ignore */
+    }
+    // The flushed segment can arrive just after pause() resolves, so keep listening briefly.
+    await new Promise((r) => setTimeout(r, 200));
+    this.vad.setListener(null);
+    const deadline = performance.now() + END_WAIT_MS;
+    while (this.pending > 0 && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    this.active = false;
+    return { text: this.currentText(), confidence: null, timing: timingFromSpans(this.spans, this.turnStart) };
+  }
+
+  dispose(): void {
+    this.active = false;
+    this.vad.setListener(null);
+    void this.vad.pause().catch(() => undefined);
+  }
+}

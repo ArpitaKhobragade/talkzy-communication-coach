@@ -1,0 +1,33 @@
+# Decisions (permanent unless a new entry supersedes)
+
+| # | Decision | Reason |
+|---|----------|--------|
+| 1 | Next.js (App Router) + TypeScript + Tailwind, single deployable app | Common, well-supported default stack; route handlers give a secure server for the API key without a separate backend. |
+| 2 | **Device-local storage (localStorage) instead of Supabase** | A hosted database such as Supabase was an option, but the project brief requires a runnable app with no external accounts, and minors' data is safer not stored on a server. Storage sits behind `services/storage.ts` so a database can replace it later. |
+| 3 | Anthropic API (Claude) for conversation + report, model configurable via `ANTHROPIC_MODEL` (default `claude-sonnet-5-5`) | Strong conversational + structured-output quality; key stays server-side. |
+| 4 | Browser Web Speech API for STT and TTS | Free, no extra credentials, real voice I/O. Limitation: Chrome/Edge/Safari only for recognition; may use a vendor cloud service (disclosed). Typed fallback always available. |
+| 5 | Half-duplex turn taking (recognition paused while coach speaks) | Prevents the mic hearing the coach's own voice. |
+| 6 | Pace/pause metrics from Web Audio voice-activity timing + recogniser word counts | Measurable without a paid service; limitations documented in the report. |
+| 7 | MediaPipe Tasks Vision (face landmarker + pose landmarker) in-browser | Pretrained, on-device, no video upload. Models downloaded by `npm run setup:vision`. |
+| 8 | No pronunciation score | Web Speech gives no phoneme data; only an approximate "words the recogniser struggled with" list is shown, labelled approximate. |
+| 9 | Dev mode when no API key: scripted coach, metrics-only report, clearly labelled | Required by brief; must not pretend AI works. |
+| 10 | Hard 20 minute/day cap, enforced in the UI and session timer | Brief requirement. |
+| 11 | Hand-rolled SVG charts, no chart library | Fewer dependencies, enough for trends. |
+| 12 | Two models: fast one for conversation (`ANTHROPIC_CHAT_MODEL`), stronger one for the report (`ANTHROPIC_MODEL`) | Voice conversation is latency-sensitive; the report is not. |
+| 13 | MediaPipe uses the **CPU** delegate with a 30 s load timeout | GPU delegate creation hung in headless Chromium; ~4 fps analysis does not need a GPU; a hang must never block a session. |
+| 14 | Content-Security-Policy `connect-src 'self'` | MediaPipe's runtime pings `odml.pa.googleapis.com` with usage logs; found by an e2e test. Blocking it makes the "video never leaves the device" claim true. |
+| 15 | Opening coach message is fixed text (no model call) | Instant start, works in both modes, and keeps the student's name off the server. |
+| 16 | Report quotes verified server-side against the transcript | Prevents the model from showing examples the student never said. |
+| 17 | Trends need 2+ completed sessions and appear silently (no message while there is too little data) | Two points are the minimum to compare; the owner asked for no explanatory text. |
+| 18 | **Groq `openai/gpt-oss-120b` is the default LLM**, behind `server/llm.ts`; Anthropic stays as an alternative (`LLM_PROVIDER`) | Owner's chosen stack. One provider layer keeps routes unchanged and lets tests stub it. Reasoning is hidden (`include_reasoning: false`) and effort is `low` for chat, `medium` for reports. |
+| 19 | **Sarvam (STT) and Cartesia (TTS) are called only from server proxy routes** (`/api/voice/stt`, `/api/voice/tts`) | Keys never reach the browser. Routes check origin, rate-limit and validate type/size; audio is forwarded and discarded. The Cartesia voice ID is server-side config. |
+| 20 | **Silero VAD in the browser splits speech into segments; each segment is transcribed separately** | Sarvam's REST endpoint accepts under ~30 s per request; segments (split at 25 s if longer) give live text while the student talks, and VAD timestamps give real pause and thinking-time measurements. |
+| 21 | Answer ends after ~3.2 s of quiet (and never while a segment is still being transcribed), or on "I'm done speaking" | The owner's report that voice answers were cut off. Longer patience beats cutting people off mid-thought. |
+| 22 | Voice failures degrade, never dead-end: Cartesia to browser voice, Sarvam to browser recogniser, then a "Try voice again" button; typing and End session are always available | The previous design permanently disabled voice after a recogniser error. |
+| 23 | Pressing End session keeps the answer being spoken | Ending mid-sentence should not lose what the student said. |
+| 24 | **Pipecat + SmallWebRTC not adopted** | They need a separate Python server. The same Sarvam/Groq/Cartesia/Silero stack is reached from the existing Next.js app over HTTP; revisit if sub-second full-duplex conversation becomes a requirement. |
+| 25 | Report is organised as Reading, Answering, Camera, each with what went well / what to improve / how to improve; numbers move into a collapsible section | The owner asked for feedback on how they performed while reading and answering and what to fix, including webcam behaviour. Coaching text is rule-based from measurements (and AI for answers and reading), and never infers emotion. |
+| 26 | Two-phase session: Phase 1 read the passage out loud (primary action), Phase 2 live conversation about it; 20 minutes per day maximum | Owner's required structure. Reading aloud is the main action but never blocks the session when voice is unavailable. |
+| 27 | Report wording is very simple English (short sentences, everyday words, always what to do), and every problem comes with a fix | Owner request; also better for young students and learners. The AI prompt enforces it and a unit test rejects jargon in the rule-based text. |
+| 28 | "Instead of this, say it like this" examples: from the AI (quote must be verbatim, verified server-side) or, without AI, worked out from the student's own words (fillers and repeats removed, or a fill-in frame for a short answer) | Shows the student exactly what to say instead, without inventing ideas. |
+| 29 | Report download is made on the device with jsPDF (PDF) or plain text from one shared document model | Nothing is uploaded; both files always say the same thing; the model is unit-tested and a real PDF is checked in e2e. |
