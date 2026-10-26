@@ -78,9 +78,10 @@ describe("buildReportDocument", () => {
     expect(documentToText(buildReportDocument(session(), ctx))).toMatch(/says nothing about how you feel/);
   });
 
-  it("includes the transcript only when it was kept", () => {
-    expect(documentToText(buildReportDocument(session({ keepTranscript: true }), ctx))).toMatch(/what was said/i);
-    expect(documentToText(buildReportDocument(session({ keepTranscript: false }), ctx))).not.toMatch(/what was said/i);
+  it("is short: the best points only, and no full transcript", () => {
+    const text = documentToText(buildReportDocument(session({ keepTranscript: true }), ctx));
+    expect(text).not.toMatch(/what was said/i);
+    expect(text.split("\n").length).toBeLessThan(70);
   });
 
   it("explains why AI feedback is missing and names the student and topic", () => {

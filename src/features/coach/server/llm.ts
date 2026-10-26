@@ -59,7 +59,7 @@ async function generateGroq(req: LlmRequest): Promise<LlmResult> {
       messages: [{ role: "system", content: req.system }, ...req.messages],
       // gpt-oss spends part of the budget on hidden reasoning, so leave headroom for the answer.
       max_completion_tokens: req.maxTokens,
-      reasoning_effort: req.purpose === "chat" ? "low" : "medium",
+      reasoning_effort: "low",
       include_reasoning: false,
       temperature: req.purpose === "chat" ? 0.7 : 0.4,
     }),

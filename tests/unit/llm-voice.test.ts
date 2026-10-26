@@ -74,11 +74,11 @@ describe("Groq (gpt-oss-120b)", () => {
     expect(body.messages[1]).toEqual({ role: "user", content: "hi" });
   });
 
-  it("uses medium reasoning for reports and throws on HTTP errors or empty replies", async () => {
+  it("uses low reasoning for reports and throws on HTTP errors or empty replies", async () => {
     vi.stubEnv("GROQ_API_KEY", "gsk-test");
     fetchMock.mockResolvedValueOnce(json({ choices: [{ message: { content: "{}" } }] }));
     await generate({ purpose: "report", system: "s", messages: [{ role: "user", content: "x" }], maxTokens: 100 });
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reasoning_effort).toBe("medium");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reasoning_effort).toBe("low");
 
     fetchMock.mockResolvedValueOnce(json({ error: "nope" }, 429));
     await expect(generate({ purpose: "chat", system: "s", messages: [], maxTokens: 10 })).rejects.toThrow(/groq_http_429/);

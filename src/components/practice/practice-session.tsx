@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Button, ButtonLink, Card, Notice, Spinner } from "@/components/ui";
+import { Badge, Button, ButtonLink, Card, Notice } from "@/components/ui";
 import { getGoal } from "@/features/content/fields";
 import { getModule } from "@/features/content/modules";
 import type { Goal } from "@/features/content/types";
@@ -11,7 +11,6 @@ import { buildSession } from "@/features/practice/finalize";
 import { describeMediaFailure, requestCamera, requestMicrophone, stopStream } from "@/features/practice/media";
 import { planSession } from "@/features/progress/daily-limit";
 import type { ReadingResult, Turn } from "@/features/session/types";
-import { GoalSchema } from "@/features/session/types";
 import { computeSpeechMetrics, countWords } from "@/features/speech/metrics";
 import { recognitionSupported } from "@/features/speech/recognition";
 import { ttsSupported } from "@/features/speech/synthesis";
@@ -62,7 +61,9 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
   const pending = useRef<ReturnType<typeof buildSession> | null>(null);
 
   const lesson = getModule(moduleId);
-  const goal: Goal = GoalSchema.safeParse(goalParam).success ? (goalParam as Goal) : (profile?.goal ?? "confidence");
+  // The goal is set in the profile (and nowhere else), so it is never read from the address.
+  void goalParam;
+  const goal: Goal = profile?.goal ?? "confidence";
   // Recomputed when stored sessions load (the first render sees an empty server snapshot).
   const clock = useNow();
   const plan = useMemo(() => planSession(sessions, clock), [sessions, clock]);
@@ -75,11 +76,34 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
   const active = useRef(true);
   const visionStarted = useRef(false);
 
+  // Load the camera models as soon as the camera box is ticked, so the camera is ready the moment the session starts.
+  useEffect(() => {
+    if (phase === "setup" && useCam && hydrated) VisionAnalyzer.preload();
+  }, [phase, useCam, hydrated]);
+
+  // The report progress bar. It moves steadily while the AI writes, then jumps to 100% when the report is ready.
+  const [progress, setProgress] = useState(0);
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startProgress = useCallback(() => {
+    const t0 = Date.now();
+    setProgress(3);
+    progressTimer.current = setInterval(() => {
+      const sec = (Date.now() - t0) / 1000;
+      setProgress((p) => Math.max(p, Math.min(92, Math.round(92 * (1 - Math.exp(-sec / 2.4))))));
+    }, 150);
+  }, []);
+  const stopProgress = useCallback(() => {
+    if (progressTimer.current) clearInterval(progressTimer.current);
+    progressTimer.current = null;
+  }, []);
+
   // Stop every device when leaving the page.
   useEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
+      VisionAnalyzer.discardPreload();
+      if (progressTimer.current) clearInterval(progressTimer.current);
       analyzerRef.current?.dispose();
       analyzerRef.current = null;
       void vadRef.current?.destroy();
@@ -102,7 +126,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
     if (visionStarted.current) return;
     visionStarted.current = true;
     setVision("loading");
-    VisionAnalyzer.create()
+    VisionAnalyzer.take()
       .then((a) => {
         const el = videoRef.current;
         if (!active.current || !el) {
@@ -170,6 +194,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
     async (r: { turns: Turn[]; degraded: boolean }) => {
       if (!lesson || !profile) return;
       setPhase("finishing");
+      startProgress();
       active.current = false; // a model that finishes loading from now on is discarded
       const visionMetrics = analyzerRef.current?.stop() ?? null;
       analyzerRef.current?.dispose();
@@ -207,6 +232,9 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
         aiReason = "Development mode: no AI key is configured, so AI-written feedback (grammar, vocabulary, structure) is not available.";
       }
 
+      stopProgress();
+      setProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 400)); // let the bar reach 100% before the page changes
       const session = buildSession({
         id: newId(),
         startedAt: timing.current.startedAt,
@@ -234,7 +262,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
         setPhase("save-error");
       }
     },
-    [lesson, profile, mode, goal, settings.keepTranscripts, router],
+    [lesson, profile, mode, goal, settings.keepTranscripts, router, startProgress, stopProgress],
   );
 
   if (!hydrated || !profile) return null;
@@ -273,9 +301,24 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
 
   if (phase === "finishing") {
     return (
-      <div className="mx-auto max-w-xl space-y-4 pt-10 text-center">
-        <Spinner label="Putting your feedback report together..." />
-        <p className="text-sm text-muted">This can take up to a minute when the AI is writing your personal feedback.</p>
+      <div className="mx-auto max-w-xl space-y-5 pt-16 text-center">
+        <h1 className="text-2xl font-bold">Making your report</h1>
+        <p className="text-6xl font-extrabold tabular-nums text-accent-ink" aria-live="off">
+          {progress}%
+        </p>
+        <div
+          role="progressbar"
+          aria-label="Report progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          className="h-3 w-full overflow-hidden rounded-full bg-line"
+        >
+          <div className="h-full rounded-full bg-gradient-to-r from-[#ff9a56] to-[#ff5e7a] transition-[width] duration-200" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="text-sm font-semibold text-muted" role="status">
+          {progress >= 100 ? "Done!" : progress < 25 ? "Counting your words and pauses..." : progress < 60 ? "Checking your answers..." : "Writing your feedback..."}
+        </p>
       </div>
     );
   }

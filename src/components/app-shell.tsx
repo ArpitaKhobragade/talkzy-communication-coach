@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useProfile } from "@/services/use-storage";
-import { ThemeToggle } from "./theme-toggle";
 import { Spinner } from "./ui";
 
 const NAV: { href: string; label: string; Icon: Icon }[] = [
@@ -47,7 +46,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               <span className="whitespace-nowrap text-[1.05rem]">Talkzy</span>
             </Link>
-            <div className="flex items-center gap-3">
             {profile && (
               <nav aria-label="Main" className="hidden gap-1 md:flex">
                 {NAV.map(({ href, label, Icon }) => {
@@ -69,8 +67,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 })}
               </nav>
             )}
-            <ThemeToggle />
-            </div>
           </div>
         </header>
       )}

@@ -24,34 +24,9 @@
   --font-display: "Fredoka Variable", "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Dark mode: the same Sunrise colours after sunset. The toggle in the header sets data-theme on <html>. */
-html[data-theme="light"] {
+/* Light only: tells the browser not to force a dark page or dark form controls. */
+html {
   color-scheme: light;
-}
-
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --color-paper: #1b1030;
-  --color-surface: #2a1a45;
-  --color-ink: #fbeeff;
-  --color-muted: #c3adda;
-  --color-line: #44295f;
-  --color-accent: #ff8a65;
-  --color-accent-dark: #ff7048;
-  --color-accent-ink: #ffb59a;
-  --color-accent-soft: #3d2352;
-  --color-good: #7fe5b5;
-  --color-good-soft: #163a31;
-  --color-warn: #ffc27a;
-  --color-warn-soft: #3e2d1d;
-  --color-bad: #ff8fa8;
-  --color-bad-soft: #402030;
-  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
-  --shadow-lift: 0 12px 28px rgba(0, 0, 0, 0.45);
-}
-
-html[data-theme="dark"] body {
-  background-image: radial-gradient(620px 320px at 100% 0%, #4a1f6b 0%, transparent 70%);
 }
 
 html {

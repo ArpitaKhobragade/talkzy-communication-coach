@@ -1,4 +1,4 @@
-import { getGoal } from "../../content/fields";
+import { GOAL_QUESTIONS, getGoal } from "../../content/fields";
 import type { LearningModule } from "../../content/types";
 import type { CoachTurnRequest, ReportRequest } from "../../session/types";
 
@@ -23,6 +23,7 @@ ${m.passage}
 """
 Useful key terms: ${m.keyTerms.join(", ")}.
 Question ideas you may adapt (do not read them out in order): ${m.followUpQuestions.join(" | ")}
+Questions that fit the student's goal (${goal.name}): ${GOAL_QUESTIONS[req.goal].join(" | ")}
 
 HOW TO RESPOND
 - Reply in 1 to 3 short sentences, at most about 45 words. No lists, no markdown, no emojis, no stage directions.
@@ -71,22 +72,23 @@ RULES
 - Tone: encouraging and respectful, appropriate for the student's age band and level. Always include genuine strengths.
 - "reading": judge the reading phase only from the reading data provided (accuracy, how much was read, pace, words the recogniser missed, or silent reading time). If the student read silently, say what the silent reading time suggests and encourage reading aloud next time. Never claim to assess pronunciation or accent; missed words only mean the recogniser did not hear them clearly (a hint to practise saying them slowly). Praise only what the reading data shows (for example "you read to the end", "your speed was good", "the app understood most of your words"). NEVER say the student understood, enjoyed, or remembered the passage: reading data cannot show that. If silent reading was extremely fast (about 400 words a minute or more), say kindly that they probably skimmed it and should read it more slowly so the talk goes better.
 - LANGUAGE: write in VERY SIMPLE English, like talking to a 12-year-old who is learning English. Short sentences (under 15 words). Everyday words. No jargon (do not say "articulation", "syntax", "cohesion", "lexical"). Say "you" and speak kindly and directly. Say clearly what went well, what went wrong, and exactly how to fix it.
+- BE BRIEF. The student wants a SHORT report. Every text field is ONE short sentence (under 20 words), never a paragraph. Use the smallest number of items allowed below.
 - Every "improve" item must say exactly what to change and how, in plain words a student can act on today.
-- "sayItBetter": choose up to 3 of the student's weakest sentences and show a clearer way to say each one. "said" must be copied EXACTLY (verbatim) from a student answer. "better" is the same idea in clear, simple, natural spoken English (fix grammar, remove filler and repeats, add a reason or example only if the student already hinted at it; never add new facts). "why" is one short sentence saying what is better. If the student's answers are already clear, return fewer items or an empty array.
+- "sayItBetter": choose up to 2 of the student's weakest sentences and show a clearer way to say each one. "said" must be copied EXACTLY (verbatim) from a student answer. "better" is the same idea in clear, simple, natural spoken English (fix grammar, remove filler and repeats, add a reason or example only if the student already hinted at it; never add new facts). "why" is one short sentence saying what is better. If the student's answers are already clear, return fewer items or an empty array.
 - Scores are 1 to 5 for each student answer: relevance (does it answer the question and relate to the reading), completeness (enough detail, a reason or example), organization (clear point, logical order).
-- exercises: 2 to 4 concrete practice tasks the student can do alone in under 10 minutes each, tied to the weaknesses you found.
+- exercises: exactly 2 concrete practice tasks the student can do alone in under 10 minutes each, tied to the weaknesses you found.
 - English only.
 
 OUTPUT: respond with ONLY one JSON object, no prose, no markdown fences, with exactly this shape:
 {
- "headline": string (1-2 encouraging sentences summarising the session),
- "strengths": [{"title": string, "detail": string, "quote": string (optional, verbatim)}] (2-4 items),
- "improvements": [{"title": string, "detail": string, "quote": string (optional, verbatim), "tip": string}] (2-4 items),
- "grammar": [{"quote": string (verbatim), "issue": string, "suggestion": string}] (0-5 items),
- "vocabulary": {"summary": string, "upgrades": [{"said": string, "tryInstead": string}] (0-4 items)},
- "structure": {"summary": string, "perAnswer": [{"answerNumber": integer, "relevance": 1-5, "completeness": 1-5, "organization": 1-5, "comment": string}]},
- "sayItBetter": [{"said": string (verbatim), "better": string, "why": string}] (0-3 items),
- "reading": {"summary": string (how the student did while reading, using ONLY the reading data given), "wentWell": [string] (1-3 items, always find something good), "improve": [{"issue": string, "howTo": string}] (0-4 items)},
+ "headline": string (ONE encouraging sentence summarising the session),
+ "strengths": [{"title": string, "detail": string, "quote": string (optional, verbatim)}] (exactly 2 items),
+ "improvements": [{"title": string, "detail": string, "quote": string (optional, verbatim), "tip": string}] (exactly 2 items),
+ "grammar": [{"quote": string (verbatim), "issue": string, "suggestion": string}] (0-3 items),
+ "vocabulary": {"summary": string, "upgrades": [{"said": string, "tryInstead": string}] (0-2 items)},
+ "structure": {"summary": string, "perAnswer": [{"answerNumber": integer, "relevance": 1-5, "completeness": 1-5, "organization": 1-5, "comment": string (under 12 words)}]},
+ "sayItBetter": [{"said": string (verbatim), "better": string, "why": string}] (0-2 items),
+ "reading": {"summary": string (how the student did while reading, using ONLY the reading data given), "wentWell": [string] (1-2 items, always find something good), "improve": [{"issue": string, "howTo": string}] (0-2 items)},
  "exercises": [{"title": string, "instructions": string, "minutes": integer 1-10}],
  "nextSessionFocus": string (one sentence)
 }`;

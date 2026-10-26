@@ -38,7 +38,7 @@ export const SettingsSchema = z.object({
   speechRate: z.number().min(0.6).max(1.3),
   /** Speak the coach's replies aloud. Students who cannot use audio can turn this off. */
   coachVoice: z.boolean(),
-  /** English variety used by speech recognition and the coach's voice. */
+  /** Speech recognition and the coach's voice use English (India). It is not a setting students can change. */
   speechLang: z.enum(["en-US", "en-GB", "en-IN", "en-AU"]),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepTranscripts: true,
   speechRate: 0.95,
   coachVoice: true,
-  speechLang: "en-US",
+  speechLang: "en-IN",
 };
 
 // ---------- Session data ----------

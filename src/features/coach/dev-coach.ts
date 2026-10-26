@@ -1,4 +1,4 @@
-import { getGoal } from "../content/fields";
+import { GOAL_QUESTIONS, getGoal } from "../content/fields";
 import { getModule } from "../content/modules";
 import type { CoachTurnRequest, CoachTurnResponse } from "../session/types";
 import { countWords } from "../speech/metrics";
@@ -50,7 +50,10 @@ export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
     return { mode: "dev", wrapUp: false, text: "Sorry, I didn't catch that clearly. Could you say it again, a little slower?" };
   }
 
-  const questions = m?.followUpQuestions ?? [];
+  // Passage questions first, with a question for the student's goal after each one.
+  const passageQs = m?.followUpQuestions ?? [];
+  const goalQs = GOAL_QUESTIONS[goal.id];
+  const questions = passageQs.flatMap((q, i) => (goalQs[i] ? [q, goalQs[i]] : [q]));
   const nextIndex = studentTurns.length - 1;
   const outOfQuestions = nextIndex >= questions.length;
   const closing = req.remainingSec < 45 || outOfQuestions;

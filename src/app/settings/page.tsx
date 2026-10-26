@@ -44,7 +44,6 @@ export default function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"transcripts" | "all" | null>(null);
   const rateId = useId();
-  const langId = useId();
 
   if (!hydrated || !profile) return null;
 
@@ -93,25 +92,6 @@ export default function SettingsPage() {
               onChange={(e) => update({ speechRate: Number(e.target.value) })}
               className="mt-2 block w-full max-w-sm accent-[var(--color-accent)]"
             />
-          </div>
-        </Row>
-        <Row>
-          <div className="py-3">
-            <label htmlFor={langId} className="font-semibold">
-              English accent for voice recognition
-            </label>
-            <p className="text-sm text-muted">Choosing the closest match helps your browser understand you.</p>
-            <select
-              id={langId}
-              value={settings.speechLang}
-              onChange={(e) => update({ speechLang: e.target.value as Settings["speechLang"] })}
-              className="mt-2 min-h-11 rounded-xl border border-line bg-surface px-3"
-            >
-              <option value="en-US">English (US)</option>
-              <option value="en-GB">English (UK)</option>
-              <option value="en-IN">English (India)</option>
-              <option value="en-AU">English (Australia)</option>
-            </select>
           </div>
         </Row>
         <Row>

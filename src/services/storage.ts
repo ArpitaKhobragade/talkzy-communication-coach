@@ -69,7 +69,8 @@ export function getSettings(): Settings {
   const raw = read(KEYS.settings);
   if (raw === settingsCache.raw) return settingsCache.value;
   const parsed = SettingsSchema.safeParse(parseJson(raw));
-  settingsCache = { raw, value: parsed.success ? parsed.data : DEFAULT_SETTINGS };
+  // English (India) is the only accent: older saved choices are ignored.
+  settingsCache = { raw, value: parsed.success ? { ...parsed.data, speechLang: "en-IN" } : DEFAULT_SETTINGS };
   return settingsCache.value;
 }
 

@@ -7,7 +7,7 @@ Live site: <https://talkzy-communication-coach-fk4c.vercel.app>
 English only. No accounts. Practice is capped at **20 minutes a day**, and everything is saved on the student's own device.
 
 <p align="center">
-  <img src="docs/screenshots/13-wide-desktop.png" alt="Talkzy home screen on a wide desktop: logo on the left, tabs and the dark-mode switch across the top" width="880">
+  <img src="docs/screenshots/13-wide-desktop.png" alt="Talkzy home screen on a wide desktop: logo on the left and the tabs across the top" width="880">
 </p>
 
 ## How it works
@@ -29,7 +29,9 @@ Each session has two phases and ends with a report.
 
 ## The feedback report
 
-The report is written in simple English, in three parts: **reading**, **answering** and **camera** (only if the student turned the camera on). Each part has **what went well**, **what to fix** and **how to fix it**.
+While the report is made, a **percentage and progress bar** show how far along it is. With the AI on, it usually takes about **3 seconds**.
+
+The report is short and written in simple English, in three parts: **reading**, **answering** and **camera** (only if the student turned the camera on). Each part shows the **one best thing**, the **one most important thing to fix** and **how to fix it**. Tap **More detail** for the rest.
 
 - **"Instead of this, say it like this"** takes sentences the student really said and shows a clearer way to say them. Every quote is checked against the transcript on the server, so the coach can never show something the student did not say.
 - Every number is labelled **Measured**, **Calculated** or **AI assessment**.
@@ -38,18 +40,23 @@ The report is written in simple English, in three parts: **reading**, **answerin
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/07-report.png" alt="Feedback report: summary and how the student did while reading"></td>
-    <td width="50%"><img src="docs/screenshots/09-report-answering.png" alt="Feedback report: answering, with instead-of-this say-it-like-this examples"></td>
+    <td width="30%"><img src="docs/screenshots/15-making-report.png" alt="Making the report: a percentage and a progress bar"><br><sub>A percentage while the report is made.</sub></td>
+    <td width="70%"><img src="docs/screenshots/07-report.png" alt="The short feedback report: reading and answering side by side"><br><sub>The short report.</sub></td>
   </tr>
 </table>
 
-## Light and dark mode
+## Your subject, your goal, your modules
 
-A **Dark / Light** switch sits at the right of the top bar. The choice is remembered on that device, and the page loads in the right mode with no flash. The layout uses the full width of the screen on laptops and large monitors, and stacks neatly on phones.
+The student chooses a **subject or specialization**, a **difficulty** and **what they want to improve** once, when they start. After that the **Library shows only the modules for their subject** and nothing has to be chosen again: the coach's questions follow their goal too. To change any of it, open **Profile** and tap a section. Everything then updates by itself.
 
-<p align="center">
-  <img src="docs/screenshots/14-dark-mode.png" alt="Talkzy home screen in dark mode" width="880">
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/16-profile.png" alt="Profile page: sections that open when tapped"><br><sub>Profile: tap a section to change it.</sub></td>
+    <td width="50%"><img src="docs/screenshots/03-library.png" alt="Library showing only the student's subject"><br><sub>Library: only the student's subject.</sub></td>
+  </tr>
+</table>
+
+Speech recognition and the coach's voice use **English (India)** only, so there is no accent setting to change.
 
 ## Progress and daily practice
 
@@ -78,9 +85,9 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library of 24 m
 - **Voice in:** [Silero VAD](https://github.com/snakers4/silero-vad) in the browser finds each stretch of speech, and each segment is sent through the app's own server route to **Sarvam** speech-to-text. The browser's own recogniser is an automatic fallback.
 - **Voice out:** **Cartesia Sonic** through a server route. The browser voice is the fallback.
 - **AI:** **Groq** (`openai/gpt-oss-120b`) writes the coach's replies and the report. Anthropic is an optional alternative.
-- **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly.
+- **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly. The models start loading as soon as the camera box is ticked, so they are ready when the session begins.
 - **Report files:** jsPDF, in the browser.
-- **Tests:** Vitest (139 unit tests) and Playwright (20 end-to-end tests).
+- **Tests:** Vitest (141 unit tests) and Playwright (23 end-to-end tests).
 
 API keys are read only by server code and never sent to the browser. A Content-Security-Policy (`connect-src 'self'`) stops the page contacting any outside server.
 

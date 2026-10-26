@@ -58,7 +58,7 @@ export default function ProgressPage() {
       <PageHeader title="Progress and history" subtitle="See how your speaking changes over time." />
 
       {sessions.length === 0 ? (
-        <EmptyState title="Nothing here yet" action={<ButtonLink href={`/practice/${rec.module.id}?goal=${rec.goal}`}>Start your first session</ButtonLink>}>
+        <EmptyState title="Nothing here yet" action={<ButtonLink href={`/practice/${rec.module.id}`}>Start your first session</ButtonLink>}>
           Your sessions will appear here after you practise.
         </EmptyState>
       ) : (
@@ -125,7 +125,7 @@ export default function ProgressPage() {
             <p className="text-muted">
               Focus: {getGoal(rec.goal).name}. {rec.reason}
             </p>
-            <ButtonLink href={`/practice/${rec.module.id}?goal=${rec.goal}`}>Practise this</ButtonLink>
+            <ButtonLink href={`/practice/${rec.module.id}`}>Practise this</ButtonLink>
           </Card>
 
           <section aria-labelledby="history-heading" className="space-y-3">

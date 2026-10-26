@@ -43,9 +43,10 @@ function bullet(i: CoachingItem): DocBlock {
 function coachingBlocks(items: CoachingItem[]): DocBlock[] {
   const g = group(items);
   const out: DocBlock[] = [];
-  if (g.good.length) out.push({ t: "h3", text: "What went well", tone: "good" }, ...g.good.map(bullet));
-  if (g.fix.length) out.push({ t: "h3", text: "What to fix", tone: "fix" }, ...g.fix.map(bullet));
-  if (g.note.length) out.push({ t: "h3", text: "Good to know", tone: "note" }, ...g.note.map(bullet));
+  // Short on purpose: the best points only. The full detail is on the report page.
+  if (g.good.length) out.push({ t: "h3", text: "What went well", tone: "good" }, ...g.good.slice(0, 1).map(bullet));
+  if (g.fix.length) out.push({ t: "h3", text: "What to fix", tone: "fix" }, ...g.fix.slice(0, 2).map(bullet));
+  if (g.note.length && g.good.length + g.fix.length < 2) out.push({ t: "h3", text: "Good to know", tone: "note" }, ...g.note.slice(0, 1).map(bullet));
   return out;
 }
 
@@ -67,8 +68,8 @@ export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] 
   blocks.push({ t: "h2", text: "1. How you did while reading" });
   if (ai?.reading) {
     blocks.push({ t: "p", text: ai.reading.summary });
-    if (ai.reading.wentWell.length) blocks.push({ t: "h3", text: "What went well", tone: "good" }, ...ai.reading.wentWell.map((text): DocBlock => ({ t: "bullet", text })));
-    if (ai.reading.improve.length) blocks.push({ t: "h3", text: "What to fix", tone: "fix" }, ...ai.reading.improve.map((x): DocBlock => ({ t: "bullet", text: x.issue, how: x.howTo })));
+    if (ai.reading.wentWell.length) blocks.push({ t: "h3", text: "What went well", tone: "good" }, ...ai.reading.wentWell.slice(0, 1).map((text): DocBlock => ({ t: "bullet", text })));
+    if (ai.reading.improve.length) blocks.push({ t: "h3", text: "What to fix", tone: "fix" }, ...ai.reading.improve.slice(0, 2).map((x): DocBlock => ({ t: "bullet", text: x.issue, how: x.howTo })));
   } else if (r.readingCoaching?.length) {
     blocks.push(...coachingBlocks(r.readingCoaching));
   } else {
@@ -82,15 +83,14 @@ export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] 
 
   if (r.sayItBetter?.length) {
     blocks.push({ t: "h3", text: "Instead of this, say it like this", tone: "good" });
-    blocks.push(...r.sayItBetter.map((x): DocBlock => ({ t: "compare", said: x.said, better: x.better, why: x.why })));
+    blocks.push(...r.sayItBetter.slice(0, 2).map((x): DocBlock => ({ t: "compare", said: x.said, better: x.better, why: x.why })));
   }
   if (ai) {
     blocks.push({ t: "h3", text: "What the AI coach noticed", tone: "note" });
-    for (const x of ai.strengths) blocks.push({ t: "bullet", text: `Went well: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}` });
-    for (const x of ai.improvements) blocks.push({ t: "bullet", text: `To fix: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}`, how: x.tip });
-    for (const g of ai.grammar) blocks.push({ t: "compare", said: g.quote, better: g.suggestion, why: g.issue });
-    if (ai.vocabulary.summary) blocks.push({ t: "bullet", text: `Words: ${ai.vocabulary.summary}` });
-    for (const u of ai.vocabulary.upgrades) blocks.push({ t: "bullet", text: `Instead of "${u.said}", try "${u.tryInstead}".` });
+    for (const x of ai.strengths.slice(0, 1)) blocks.push({ t: "bullet", text: `Went well: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}` });
+    for (const x of ai.improvements.slice(0, 2)) blocks.push({ t: "bullet", text: `To fix: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}`, how: x.tip });
+    for (const g of ai.grammar.slice(0, 2)) blocks.push({ t: "compare", said: g.quote, better: g.suggestion, why: g.issue });
+    for (const u of ai.vocabulary.upgrades.slice(0, 2)) blocks.push({ t: "bullet", text: `Instead of "${u.said}", try "${u.tryInstead}".` });
   }
 
   // 3. Camera
@@ -107,20 +107,14 @@ export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] 
   // Practice
   blocks.push({ t: "h2", text: "Practise before your next session" });
   const exercises = ai ? ai.exercises : r.fallbackExercises;
-  for (const e of exercises) blocks.push({ t: "bullet", text: `${e.title} (about ${e.minutes} min): ${e.instructions}` });
+  for (const e of exercises.slice(0, 2)) blocks.push({ t: "bullet", text: `${e.title} (about ${e.minutes} min): ${e.instructions}` });
   if (ai?.nextSessionFocus) blocks.push({ t: "p", text: `Next time, focus on this: ${ai.nextSessionFocus}` });
   if (ctx.next) blocks.push({ t: "p", text: `Next session we suggest: ${ctx.next.title} (${ctx.next.level}). ${ctx.next.reason}` });
 
-  // Numbers
+  // Numbers (the three that matter most)
   if (r.speechNotes.length) {
     blocks.push({ t: "h2", text: "Your numbers" });
-    blocks.push(...r.speechNotes.map((text): DocBlock => ({ t: "bullet", text })));
-  }
-
-  // Transcript
-  if (s.transcriptKept && s.turns.length) {
-    blocks.push({ t: "h2", text: "What was said" });
-    for (const t of s.turns) blocks.push({ t: "bullet", text: `${t.role === "coach" ? "Coach" : "You"}: ${t.text}` });
+    blocks.push(...r.speechNotes.slice(0, 3).map((text): DocBlock => ({ t: "bullet", text })));
   }
 
   blocks.push({ t: "note", text: "This report is a guide to help you practise. It is not an exam mark." });

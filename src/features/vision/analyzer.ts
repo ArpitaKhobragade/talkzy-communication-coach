@@ -44,18 +44,21 @@ export class VisionAnalyzer {
     const load = (async () => {
       const { FilesetResolver, FaceLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
       const fileset = await FilesetResolver.forVisionTasks(WASM_PATH);
-      const face = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate: "CPU" },
-        runningMode: "VIDEO",
-        numFaces: 1,
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: true,
-      });
-      const pose = await PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: POSE_MODEL, delegate: "CPU" },
-        runningMode: "VIDEO",
-        numPoses: 1,
-      });
+      // Both models load at the same time, which is much quicker than one after the other.
+      const [face, pose] = await Promise.all([
+        FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: FACE_MODEL, delegate: "CPU" },
+          runningMode: "VIDEO",
+          numFaces: 1,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: true,
+        }),
+        PoseLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: POSE_MODEL, delegate: "CPU" },
+          runningMode: "VIDEO",
+          numPoses: 1,
+        }),
+      ]);
       const analyzer = new VisionAnalyzer(face, pose);
       if (timedOut) {
         analyzer.dispose(); // finished after we gave up: do not leak it
@@ -79,6 +82,32 @@ export class VisionAnalyzer {
         ? err
         : new VisionUnavailableError(err instanceof Error ? err.message : "Vision models could not be loaded");
     }
+  }
+
+  private static pending: Promise<VisionAnalyzer> | null = null;
+
+  /** Starts loading the models early (when the student ticks the camera box), so they are ready when the session starts. */
+  static preload(): void {
+    if (this.pending) return;
+    const p = this.create();
+    this.pending = p;
+    p.catch(() => {
+      if (this.pending === p) this.pending = null;
+    });
+  }
+
+  /** Uses the models loaded by preload() if there are any, otherwise loads them now. */
+  static take(): Promise<VisionAnalyzer> {
+    const p = this.pending;
+    this.pending = null;
+    return p ?? this.create();
+  }
+
+  /** Throws away models that were loaded early but never used (the student left or unticked the camera). */
+  static discardPreload(): void {
+    const p = this.pending;
+    this.pending = null;
+    p?.then((a) => a.dispose()).catch(() => undefined);
   }
 
   /** Start sampling frames from a playing <video>. `onStatus` drives the small live hint. */

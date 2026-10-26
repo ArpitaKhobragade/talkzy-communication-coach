@@ -52,12 +52,41 @@ function Block({ title, tone, children }: { title: string; tone: "good" | "warn"
   );
 }
 
-/** Rule-based coaching, grouped into what went well, what to improve (with why and how), and notes. */
-function CoachingList({ items, emptyText }: { items: CoachingItem[]; emptyText?: string }) {
+/** Keeps the report short: the extra detail stays folded away until the student opens it. */
+function More({ children, label = "More detail" }: { children: ReactNode; label?: string }) {
+  return (
+    <details className="rounded-xl border border-line bg-paper/60 p-3">
+      <summary className="cursor-pointer text-sm font-bold text-accent-ink">{label}</summary>
+      <div className="mt-3 space-y-5">{children}</div>
+    </details>
+  );
+}
+
+/**
+ * Rule-based coaching, grouped into what went well, what to improve (with why and how), and notes.
+ * In compact mode only the most important point of each kind is shown, and the rest is folded away.
+ */
+function CoachingList({ items, emptyText, compact = false }: { items: CoachingItem[]; emptyText?: string; compact?: boolean }) {
   const good = items.filter((i) => i.kind === "good");
   const improve = items.filter((i) => i.kind === "improve");
   const info = items.filter((i) => i.kind === "info");
   if (items.length === 0) return emptyText ? <p className="text-muted">{emptyText}</p> : null;
+  if (compact) {
+    const shownGood = good.slice(0, 1);
+    const shownImprove = improve.slice(0, 1);
+    const shownInfo = info.slice(0, shownGood.length + shownImprove.length < 2 ? 1 : 0);
+    const rest = [...good.slice(1), ...improve.slice(1), ...info.slice(shownInfo.length)];
+    return (
+      <div className="space-y-4">
+        <CoachingList items={[...shownGood, ...shownImprove, ...shownInfo]} />
+        {rest.length > 0 && (
+          <More>
+            <CoachingList items={rest} />
+          </More>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-5">
       {good.length > 0 && (
@@ -265,7 +294,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             {ai.reading.wentWell.length > 0 && (
               <Block title="What went well" tone="good">
                 <ul className="list-disc space-y-1 pl-5 text-[0.95rem]">
-                  {ai.reading.wentWell.map((t, i) => (
+                  {ai.reading.wentWell.slice(0, 1).map((t, i) => (
                     <li key={i}>{t}</li>
                   ))}
                 </ul>
@@ -274,7 +303,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             {ai.reading.improve.length > 0 && (
               <Block title="What to fix" tone="warn">
                 <ul className="space-y-3">
-                  {ai.reading.improve.map((t, i) => (
+                  {ai.reading.improve.slice(0, 1).map((t, i) => (
                     <li key={i} className="rounded-xl border border-warn/25 bg-warn-soft/50 p-3 text-[0.95rem]">
                       <p className="font-semibold">{t.issue}</p>
                       <p className="mt-2 text-sm">
@@ -286,27 +315,46 @@ export function ReportView({ sessionId }: { sessionId: string }) {
                 </ul>
               </Block>
             )}
-            {aloud?.missedWords.length ? (
-              <p className="text-sm text-muted">
-                Words the recogniser did not hear clearly (approximate, not a pronunciation score): {aloud.missedWords.slice(0, 8).join(", ")}.
-              </p>
+            {ai.reading.wentWell.length > 1 || ai.reading.improve.length > 1 || aloud?.missedWords.length ? (
+              <More>
+                {ai.reading.wentWell.slice(1).map((t, i) => (
+                  <p key={"w" + i} className="text-[0.95rem]">
+                    <span className="font-semibold text-good">Also good: </span>
+                    {t}
+                  </p>
+                ))}
+                {ai.reading.improve.slice(1).map((t, i) => (
+                  <p key={"i" + i} className="text-[0.95rem]">
+                    <span className="font-semibold text-warn">Also fix: </span>
+                    {t.issue} <span className="font-semibold">How to fix it: </span>
+                    {t.howTo}
+                  </p>
+                ))}
+                {aloud?.missedWords.length ? (
+                  <p className="text-sm text-muted">
+                    Words the recogniser did not hear clearly (approximate, not a pronunciation score): {aloud.missedWords.slice(0, 8).join(", ")}.
+                  </p>
+                ) : null}
+              </More>
             ) : null}
           </div>
         ) : (
-          <CoachingList items={readingCoaching} emptyText="No reading data was recorded for this session." />
+          <CoachingList compact items={readingCoaching} emptyText="No reading data was recorded for this session." />
         )}
         {aloud && (
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Words matched" value={`${aloud.accuracyPct}%`} hint="Of words you reached" />
-            <Stat label="Passage read" value={`${aloud.coveragePct}%`} />
-            <Stat label="Reading pace" value={aloud.wpm !== null ? `${aloud.wpm} wpm` : "n/a"} />
-          </div>
+          <More label="Reading numbers">
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label="Words matched" value={`${aloud.accuracyPct}%`} hint="Of words you reached" />
+              <Stat label="Passage read" value={`${aloud.coveragePct}%`} />
+              <Stat label="Reading pace" value={aloud.wpm !== null ? `${aloud.wpm} wpm` : "n/a"} />
+            </div>
+          </More>
         )}
       </Section>
 
       {/* 2. ANSWERS */}
       <Section icon={<ChatsCircle size={22} weight="duotone" />} title="2. How you did while answering" subtitle="From your spoken answers in the conversation." tag={<SourceTag kind="measured" />}>
-        <CoachingList items={answerCoaching} emptyText="Not enough answers were captured to coach on." />
+        <CoachingList compact items={answerCoaching} emptyText="Not enough answers were captured to coach on." />
 
         {sayItBetter.length > 0 && (
           <div className="space-y-3 border-t border-line pt-5">
@@ -319,7 +367,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             </div>
             <p className="text-sm text-muted">These are sentences from your talk. Next to each one is a clearer way to say it.</p>
             <ul className="space-y-3">
-              {sayItBetter.map((x, i) => (
+              {sayItBetter.slice(0, 2).map((x, i) => (
                 <li key={i} className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
                   <p className="flex items-start gap-2 text-sm">
                     <XCircle size={20} weight="fill" className="mt-px shrink-0 text-warn" aria-hidden />
@@ -351,7 +399,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             <div className="grid gap-5 md:grid-cols-2">
               <Block title="What went well" tone="good">
                 <ul className="space-y-4">
-                  {ai.strengths.map((x, i) => (
+                  {ai.strengths.slice(0, 1).map((x, i) => (
                     <li key={i}>
                       <p className="font-semibold">{x.title}</p>
                       <p className="text-[0.95rem] text-muted">{x.detail}</p>
@@ -362,7 +410,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
               </Block>
               <Block title="What to fix" tone="warn">
                 <ul className="space-y-4">
-                  {ai.improvements.map((x, i) => (
+                  {ai.improvements.slice(0, 1).map((x, i) => (
                     <li key={i}>
                       <p className="font-semibold">{x.title}</p>
                       <p className="text-[0.95rem] text-muted">{x.detail}</p>
@@ -378,14 +426,38 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             </div>
 
             <details className="rounded-xl border border-line p-4">
-              <summary className="cursor-pointer font-semibold">Grammar, vocabulary and answer structure</summary>
+              <summary className="cursor-pointer text-sm font-bold text-accent-ink">More detail: grammar, vocabulary and answer structure</summary>
               <div className="mt-4 space-y-5">
+                {ai.strengths.length > 1 || ai.improvements.length > 1 ? (
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <ul className="space-y-3">
+                      {ai.strengths.slice(1).map((x, i) => (
+                        <li key={i}>
+                          <p className="font-semibold text-good">Also good: {x.title}</p>
+                          <p className="text-[0.95rem] text-muted">{x.detail}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    <ul className="space-y-3">
+                      {ai.improvements.slice(1).map((x, i) => (
+                        <li key={i}>
+                          <p className="font-semibold text-warn">Also fix: {x.title}</p>
+                          <p className="text-[0.95rem] text-muted">{x.detail}</p>
+                          <p className="text-sm">
+                            <span className="font-semibold">How to fix it: </span>
+                            {x.tip}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <Block title="Grammar" tone="neutral">
                   {ai.grammar.length === 0 ? (
                     <p className="text-[0.95rem] text-muted">No clear grammar mistakes were found in what you said. Nice work.</p>
                   ) : (
                     <ul className="space-y-3">
-                      {ai.grammar.map((g, i) => (
+                      {ai.grammar.slice(0, 3).map((g, i) => (
                         <li key={i} className="rounded-xl border border-line p-3 text-[0.95rem]">
                           <p>
                             <span className="font-semibold">You said: </span>
@@ -460,10 +532,10 @@ export function ReportView({ sessionId }: { sessionId: string }) {
         {hasCameraData ? (
           <>
             {cameraCoaching.length > 0 ? (
-              <CoachingList items={cameraCoaching} />
+              <CoachingList compact items={cameraCoaching} />
             ) : (
               <ul className="list-disc space-y-2 pl-5 text-[0.95rem] text-muted">
-                {s.report.bodyLanguageNotes.map((n, i) => (
+                {s.report.bodyLanguageNotes.slice(0, 3).map((n, i) => (
                   <li key={i}>{n}</li>
                 ))}
               </ul>
@@ -483,7 +555,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
 
       <Section icon={<Target size={22} weight="duotone" />} title="Practice before next time" tag={ai ? <SourceTag kind="ai" /> : <SourceTag kind="rule" />}>
         <ul className="space-y-3">
-          {exercises.map((e, i) => (
+          {exercises.slice(0, 2).map((e, i) => (
             <li key={i} className="rounded-xl border border-line p-3">
               <p className="font-semibold">
                 {e.title} <span className="text-sm font-normal text-muted">· about {e.minutes} min</span>
@@ -503,7 +575,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
             {rec.module.title} ({rec.module.level}) · focus on {getGoal(rec.goal).name.toLowerCase()}. {rec.reason}
           </p>
           <div className="mt-3">
-            <ButtonLink href={`/practice/${rec.module.id}?goal=${rec.goal}`}>Practise this next</ButtonLink>
+            <ButtonLink href={`/practice/${rec.module.id}`}>Practise this next</ButtonLink>
           </div>
         </div>
       </Section>

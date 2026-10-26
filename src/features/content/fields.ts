@@ -90,6 +90,30 @@ export const GOALS: { id: Goal; name: string; description: string; coachFocus: s
   },
 ];
 
+/** Extra questions that match what the student wants to improve. They are mixed in with the passage questions. */
+export const GOAL_QUESTIONS: Record<Goal, string[]> = {
+  fluency: [
+    "Tell me about this topic for one minute without stopping. What comes to your mind first?",
+    "Explain the main idea once more, this time without long pauses, in your own words.",
+  ],
+  clarity: [
+    "Explain the main idea in three short parts: your point, one reason and one example.",
+    "How would you explain this to a friend who has never heard of it?",
+  ],
+  vocabulary: [
+    "Which key words from the passage could you use to describe this idea? Try to use two of them.",
+    "Can you say your last point again using a more exact word?",
+  ],
+  confidence: [
+    "What is your own opinion about this topic, and why? There are no wrong answers.",
+    "Which part of this topic do you feel most sure about? Tell me about it.",
+  ],
+  interview: [
+    "Imagine an interviewer asks you about this topic. Give a short, clear answer with one example.",
+    "What is one strength you could show an interviewer through this topic?",
+  ],
+};
+
 export function getField(id: FieldId): FieldInfo {
   const f = FIELDS.find((x) => x.id === id);
   if (!f) throw new Error(`Unknown field: ${id}`);

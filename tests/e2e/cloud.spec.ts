@@ -84,7 +84,7 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   const chats = log.chat as { model: string; reasoning_effort: string; include_reasoning: boolean; isReport: boolean; authorization: string }[];
   expect(chats.every((c) => c.model === "openai/gpt-oss-120b" && c.include_reasoning === false && c.authorization === "Bearer test-groq")).toBe(true);
   expect(chats.find((c) => !c.isReport)?.reasoning_effort).toBe("low");
-  expect(chats.find((c) => c.isReport)?.reasoning_effort).toBe("medium");
+  expect(chats.find((c) => c.isReport)?.reasoning_effort).toBe("low");
 
   // The browser only ever talked to this app, never to a service directly (keys stay on the server).
   const direct = browserRequests.filter((u) => u.includes(":3101") || /sarvam|cartesia|groq/i.test(u));

@@ -91,7 +91,7 @@ export default function DashboardPage() {
 
           <div className="flex flex-wrap gap-3 pt-1">
             {plan.canStart ? (
-              <ButtonLink href={`/practice/${rec.module.id}?goal=${rec.goal}`} size="lg" icon={<Microphone size={20} weight="fill" aria-hidden />}>
+              <ButtonLink href={`/practice/${rec.module.id}`} size="lg" icon={<Microphone size={20} weight="fill" aria-hidden />}>
                 Start today&apos;s practice
               </ButtonLink>
             ) : (

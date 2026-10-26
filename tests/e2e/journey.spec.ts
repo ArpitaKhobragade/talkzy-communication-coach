@@ -243,7 +243,7 @@ test("layout has no horizontal scroll at 375, 768 and 1440 px", async ({ page })
   }
 });
 
-test("the page uses the full screen width and the header spans it", async ({ page }) => {
+test("the page uses the full screen width and the header spans it, in the light theme", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await completeOnboarding(page);
   const logo = await page.getByRole("link", { name: "Talkzy" }).first().boundingBox();
@@ -254,31 +254,77 @@ test("the page uses the full screen width and the header spans it", async ({ pag
   expect(hero).not.toBeNull();
   const scrolls = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(scrolls).toBe(false);
+  // Light only: no theme switch, and the page colour is the cream Sunrise background.
+  await expect(page.getByRole("button", { name: /dark mode|light mode/i })).toHaveCount(0);
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(255, 244, 232)");
 });
 
-test("light and dark mode: switch, remember after reload, and keep text readable", async ({ page }) => {
+test("library shows only the modules for your subject, with no filters", async ({ page }) => {
+  await completeOnboarding(page, { field: /Engineering/, level: /Intermediate/ });
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Engineering modules" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(3);
+  await expect(page.getByText("Your level")).toBeVisible();
+  // No way to pick another subject, difficulty or goal here: that lives in the profile.
+  await expect(page.getByRole("group", { name: /Filter/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /All fields|Any level/ })).toHaveCount(0);
+  await expect(page.getByText("What Is a Brand?")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Change subject or goal in your profile/ })).toBeVisible();
+});
+
+test("profile sections open when tapped, and changing the subject changes the library", async ({ page }) => {
+  await completeOnboarding(page, { field: /Business & Marketing/ });
+  await page.goto("/profile");
+  // Closed at first: only the current choice is shown.
+  await expect(page.getByText("Business & Marketing").first()).toBeVisible();
+  await expect(page.getByRole("radio", { name: /^Science/ })).toBeHidden();
+  await page.getByText("Your subject or specialization").click();
+  await expect(page.getByRole("radio", { name: /^Science/ })).toBeVisible();
+  await page.getByRole("radio", { name: /^Science/ }).check();
+  await page.locator("summary", { hasText: "What do you want to improve?" }).click();
+  await page.getByRole("radio", { name: /Prepare for interviews/ }).check();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/Saved\./)).toBeVisible();
+
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Science modules" })).toBeVisible();
+  await expect(page.getByText("Focus: Prepare for interviews").first()).toBeVisible();
+});
+
+test("no accent choice in Settings: speech is English (India) only", async ({ page }) => {
   await completeOnboarding(page);
-  const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
-  expect(await theme()).toBe("light");
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: /Settings/ }).first()).toBeVisible();
+  await expect(page.getByText(/English accent/i)).toHaveCount(0);
+  await expect(page.getByRole("combobox")).toHaveCount(0);
+});
 
-  await page.getByRole("button", { name: "Switch to dark mode" }).click();
-  expect(await theme()).toBe("dark");
-  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  expect(bg).toBe("rgb(27, 16, 48)"); // the dark page colour
-
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Hi Riya!" })).toBeVisible();
-  expect(await theme()).toBe("dark"); // remembered, no flash back to light
-
-  // Buttons stay readable: the main button flips to a light fill with dark text.
-  const btn = page.getByRole("link", { name: /Start today.s practice/ });
-  const colours = await btn.evaluate((el) => {
-    const cs = getComputedStyle(el);
-    return { bg: cs.backgroundColor, fg: cs.color };
+test("while the report is made a percentage and a progress bar are shown", async ({ page }) => {
+  await completeOnboarding(page);
+  // Make the report take a moment so the bar can be seen.
+  await page.route("**/api/status", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    await route.fulfill({ response: res, json: { ...body, mode: "live", llm: "groq" } });
   });
-  expect(colours.bg).not.toBe(colours.fg);
-  expect(colours.fg).toBe("rgb(27, 16, 48)");
-
-  await page.getByRole("button", { name: "Switch to light mode" }).click();
-  expect(await theme()).toBe("light");
+  await page.route("**/api/coach/report", async (route) => {
+    await new Promise((r) => setTimeout(r, 2500));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ai: null, reason: "Test: no AI." }) });
+  });
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await page.waitForTimeout(3500);
+  await page.getByRole("button", { name: /finished reading/ }).click();
+  await expect(page.getByText(/Your turn/)).toBeVisible({ timeout: 30_000 });
+  const typing = page.getByLabel("Type your answer");
+  if (!(await typing.isVisible())) await page.getByRole("button", { name: "Type instead" }).click();
+  await typing.fill("I think prototypes help teams find mistakes early, because a small model is cheaper than a finished product.");
+  await page.getByRole("button", { name: "Send answer" }).click();
+  await expect(page.getByText(/Your turn/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "End session" }).click();
+  await page.getByRole("button", { name: "Yes, end" }).click();
+  const bar = page.getByRole("progressbar", { name: "Report progress" });
+  await expect(bar).toBeVisible();
+  await expect(page.getByText(/^\d{1,3}%$/)).toBeVisible();
+  await page.waitForURL(/\/report\//, { timeout: 30_000 });
 });
