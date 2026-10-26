@@ -501,7 +501,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const studentCount = turns.filter((t) => t.role === "student").length;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 pb-32">
+    <div className="mx-auto max-w-5xl space-y-5 pb-32">
       <div className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 bg-paper/95 px-4 py-2 backdrop-blur md:mx-0 md:px-0">
         <div className="w-full">
           <PhaseSteps current={2} />
@@ -614,8 +614,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
                 <div ref={levelBar} className="h-full origin-left rounded-full bg-good transition-transform" style={{ transform: "scaleX(0.03)" }} />
               </div>
             </div>
-            <p className="mt-3 min-h-14 rounded-[1.6rem_1.6rem_0.4rem_1.6rem] bg-ink px-5 py-3.5 text-[1.02rem] leading-relaxed text-white" data-testid="live-transcript">
-              {interim || <span className="text-white/70">Listening for your voice...</span>}
+            <p className="mt-3 min-h-14 rounded-[1.6rem_1.6rem_0.4rem_1.6rem] bg-ink px-5 py-3.5 text-[1.02rem] leading-relaxed text-paper" data-testid="live-transcript">
+              {interim || <span className="text-paper/70">Listening for your voice...</span>}
             </p>
           </div>
         )}
@@ -682,7 +682,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
             <li
               key={t.id}
               className={`max-w-[88%] rounded-2xl px-4 py-2.5 leading-relaxed ${
-                t.role === "coach" ? "mr-auto rounded-bl-md bg-white text-ink shadow-sm" : "ml-auto rounded-br-md bg-ink text-white"
+                t.role === "coach" ? "mr-auto rounded-bl-md bg-surface text-ink shadow-sm" : "ml-auto rounded-br-md bg-ink text-paper"
               }`}
             >
               <span className="font-semibold">{t.role === "coach" ? "Coach" : "You"}: </span>

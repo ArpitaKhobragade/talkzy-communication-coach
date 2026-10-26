@@ -139,7 +139,7 @@ export function ReadingPhase({
   const mm = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5">
       <div className="space-y-3">
         <PhaseSteps current={1} />
         <div className="flex flex-wrap items-center justify-between gap-3">

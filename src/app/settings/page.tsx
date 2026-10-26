@@ -64,7 +64,7 @@ export default function SettingsPage() {
   const withTranscripts = sessions.filter((s) => s.transcriptKept && s.turns.length > 0).length;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader title="Settings and privacy" subtitle="You are in control of your voice, camera and saved data." />
       <DevModeBanner mode={mode} />
       {message && (

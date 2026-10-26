@@ -204,7 +204,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={s.report.generatedBy === "ai" ? "good" : "warn"}>{s.report.generatedBy === "ai" ? "AI-written feedback" : "Development mode"}</Badge>
@@ -256,6 +256,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
         </Notice>
       )}
 
+      <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
       {/* 1. READING */}
       <Section icon={<BookOpenText size={22} weight="duotone" />} title="1. How you did while reading" subtitle="From your reading-aloud results, or your reading time if you read silently." tag={<SourceTag kind="measured" />}>
         {ai?.reading ? (
@@ -506,6 +507,8 @@ export function ReportView({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       </Section>
+
+      </div>
 
       <details className="rounded-card border border-line bg-surface p-5">
         <summary className="cursor-pointer text-lg font-bold">All the numbers</summary>

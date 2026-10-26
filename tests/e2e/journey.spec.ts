@@ -242,3 +242,43 @@ test("layout has no horizontal scroll at 375, 768 and 1440 px", async ({ page })
     }
   }
 });
+
+test("the page uses the full screen width and the header spans it", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await completeOnboarding(page);
+  const logo = await page.getByRole("link", { name: "Talkzy" }).first().boundingBox();
+  const nav = await page.getByRole("navigation", { name: "Main" }).boundingBox();
+  const hero = await page.getByRole("link", { name: /Start today.s practice/ }).boundingBox();
+  expect(logo!.x).toBeLessThan(120); // logo at the left edge, not in a centred column
+  expect(nav!.x + nav!.width).toBeGreaterThan(1300); // tabs reach the right side
+  expect(hero).not.toBeNull();
+  const scrolls = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+  expect(scrolls).toBe(false);
+});
+
+test("light and dark mode: switch, remember after reload, and keep text readable", async ({ page }) => {
+  await completeOnboarding(page);
+  const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
+  expect(await theme()).toBe("light");
+
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  expect(await theme()).toBe("dark");
+  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(bg).toBe("rgb(27, 16, 48)"); // the dark page colour
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Hi Riya!" })).toBeVisible();
+  expect(await theme()).toBe("dark"); // remembered, no flash back to light
+
+  // Buttons stay readable: the main button flips to a light fill with dark text.
+  const btn = page.getByRole("link", { name: /Start today.s practice/ });
+  const colours = await btn.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, fg: cs.color };
+  });
+  expect(colours.bg).not.toBe(colours.fg);
+  expect(colours.fg).toBe("rgb(27, 16, 48)");
+
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  expect(await theme()).toBe("light");
+});

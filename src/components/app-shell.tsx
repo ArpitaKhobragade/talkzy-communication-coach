@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useProfile } from "@/services/use-storage";
+import { ThemeToggle } from "./theme-toggle";
 import { Spinner } from "./ui";
 
 const NAV: { href: string; label: string; Icon: Icon }[] = [
@@ -39,13 +40,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-dvh">
       {!focusMode && (
         <header className="sticky top-0 z-20 border-b border-line bg-paper/90 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 md:px-8">
+          <div className="mx-auto flex max-w-[1920px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-10 xl:px-16">
             <Link href="/" className="flex items-center gap-2.5 font-extrabold tracking-tight">
               <span className="grid h-9 w-9 place-items-center rounded-[50%_50%_50%_8px] bg-gradient-to-br from-[#ff9a56] to-[#ff5e7a] text-white shadow-sm" aria-hidden>
                 <Microphone size={20} weight="fill" />
               </span>
               <span className="whitespace-nowrap text-[1.05rem]">Talkzy</span>
             </Link>
+            <div className="flex items-center gap-3">
             {profile && (
               <nav aria-label="Main" className="hidden gap-1 md:flex">
                 {NAV.map(({ href, label, Icon }) => {
@@ -56,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       href={href}
                       aria-current={active ? "page" : undefined}
                       className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                        active ? "bg-ink text-white" : "text-muted hover:bg-white hover:text-ink"
+                        active ? "bg-ink text-paper" : "text-muted hover:bg-surface hover:text-ink"
                       }`}
                     >
                       {/* Icons only from the large breakpoint up, so the labels fit on a tablet. */}
@@ -67,11 +69,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 })}
               </nav>
             )}
+            <ThemeToggle />
+            </div>
           </div>
         </header>
       )}
 
-      <main className={`mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-10 ${profile && !focusMode ? "pb-28 md:pb-10" : ""}`}>
+      <main className={`mx-auto max-w-[1920px] px-4 py-6 sm:px-6 md:py-10 lg:px-10 xl:px-16 ${profile && !focusMode ? "pb-28 md:pb-10" : ""}`}>
         {waiting ? <Spinner label="Loading your coach" /> : children}
       </main>
 

@@ -261,7 +261,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
   }
 
   const topBar = (
-    <div className="mx-auto mb-5 flex max-w-3xl items-center justify-between">
+    <div className="mb-5 flex items-center justify-between">
       <span className="font-bold">Talkzy</span>
       {phase === "setup" || phase === "reading" ? (
         <Link href="/" className="text-sm font-semibold text-muted hover:text-ink">
@@ -308,7 +308,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
     <div>
       {topBar}
       {phase === "setup" && (
-        <div className="mx-auto max-w-3xl space-y-5">
+        <div className="mx-auto max-w-5xl space-y-5">
           <DevModeBanner mode={mode} />
           <Card className="space-y-4">
             <div className="flex flex-wrap gap-2">

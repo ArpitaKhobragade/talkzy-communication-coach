@@ -14,11 +14,18 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  colorScheme: "light dark",
 };
+
+// Runs before the first paint so a saved dark choice never flashes light. Light is the default.
+const THEME_SCRIPT = `(function(){var t="light";try{t=localStorage.getItem("talkzy.theme")==="dark"?"dark":"light"}catch(e){}document.documentElement.dataset.theme=t})();`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-4 focus:py-2">
           Skip to content

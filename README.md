@@ -7,7 +7,7 @@ Live site: <https://talkzy-communication-coach-fk4c.vercel.app>
 English only. No accounts. Practice is capped at **20 minutes a day**, and everything is saved on the student's own device.
 
 <p align="center">
-  <img src="docs/screenshots/02-dashboard.png" alt="Talkzy home screen with today's practice, daily time ring and weekly chart" width="880">
+  <img src="docs/screenshots/13-wide-desktop.png" alt="Talkzy home screen on a wide desktop: logo on the left, tabs and the dark-mode switch across the top" width="880">
 </p>
 
 ## How it works
@@ -43,6 +43,14 @@ The report is written in simple English, in three parts: **reading**, **answerin
   </tr>
 </table>
 
+## Light and dark mode
+
+A **Dark / Light** switch sits at the right of the top bar. The choice is remembered on that device, and the page loads in the right mode with no flash. The layout uses the full width of the screen on laptops and large monitors, and stacks neatly on phones.
+
+<p align="center">
+  <img src="docs/screenshots/14-dark-mode.png" alt="Talkzy home screen in dark mode" width="880">
+</p>
+
 ## Progress and daily practice
 
 Trends appear by themselves once there are two sessions to compare: filler words per 100 words, average answer length, practice minutes, a streak, and a recommendation for what to practise next.
@@ -72,7 +80,7 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library of 24 m
 - **AI:** **Groq** (`openai/gpt-oss-120b`) writes the coach's replies and the report. Anthropic is an optional alternative.
 - **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly.
 - **Report files:** jsPDF, in the browser.
-- **Tests:** Vitest (139 unit tests) and Playwright (18 end-to-end tests).
+- **Tests:** Vitest (139 unit tests) and Playwright (20 end-to-end tests).
 
 API keys are read only by server code and never sent to the browser. A Content-Security-Policy (`connect-src 'self'`) stops the page contacting any outside server.
 

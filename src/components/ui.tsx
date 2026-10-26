@@ -11,8 +11,8 @@ const sizes: Record<Size, string> = {
   lg: "min-h-13 px-7 text-base",
 };
 const variants: Record<Variant, string> = {
-  primary: "border-2 border-ink bg-ink text-white shadow-sm hover:bg-[#44305c] hover:shadow-lift",
-  secondary: "border-2 border-ink bg-transparent text-ink hover:bg-white",
+  primary: "border-2 border-ink bg-ink text-paper shadow-sm hover:opacity-90 hover:shadow-lift",
+  secondary: "border-2 border-ink bg-transparent text-ink hover:bg-surface",
   ghost: "text-accent-ink hover:bg-accent-soft",
   danger: "border-2 border-bad bg-transparent text-bad hover:bg-bad-soft",
 };

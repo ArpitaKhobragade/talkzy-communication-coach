@@ -12,7 +12,7 @@ export default function ProfilePage() {
   if (!profile) return null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader title="Your profile" subtitle="Change your subject, difficulty or goal at any time. Your recommendations update straight away." />
       {saved && (
         <Notice tone="good" role="status">
