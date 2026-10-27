@@ -87,6 +87,14 @@ export async function mockSpeech(page: Page, answers: string[]) {
   }, answers);
 }
 
+/** The short report is shown first; the long sections are folded under "See the full report". */
+export async function openFullReport(page: Page) {
+  await expect(page.getByTestId("quick-report")).toBeVisible();
+  await page.getByTestId("full-report").evaluate((el) => {
+    (el as HTMLDetailsElement).open = true;
+  });
+}
+
 export async function completeOnboarding(
   page: Page,
   opts: { name?: string; age?: RegExp; field?: RegExp; level?: RegExp; goal?: RegExp } = {},

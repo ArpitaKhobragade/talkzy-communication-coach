@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cleanName, NAME_MAX } from "./name";
 
 export const FieldIdSchema = z.enum([
   "computer-science",
@@ -17,7 +18,7 @@ export const AgeBandSchema = z.enum(["under13", "13to17", "18plus"]);
 // ---------- Profile & settings ----------
 
 export const ProfileSchema = z.object({
-  displayName: z.string().trim().min(1).max(40),
+  displayName: z.string().transform(cleanName).pipe(z.string().min(1).max(NAME_MAX)),
   ageBand: AgeBandSchema,
   field: FieldIdSchema,
   level: LevelSchema,

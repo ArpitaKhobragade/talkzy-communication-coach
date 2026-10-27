@@ -81,6 +81,8 @@ createServer(async (req, res) => {
       keyterms: /name="keyterms"\r\n\r\n([^\r]+)/.exec(text)?.[1],
     });
     if (state.sttMode === "fail") return json(res, 500, { error: { message: "mock failure" } });
+    // A slow speech service: the accurate transcript only arrives some seconds after the student stops.
+    if (state.sttMode === "slow") await new Promise((r) => setTimeout(r, 7000));
     const transcript = TRANSCRIPTS[state.sttCalls++ % TRANSCRIPTS.length];
     return json(res, 200, { request_id: "mock", transcript, language_code: "en-IN" });
   }

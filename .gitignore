@@ -27,3 +27,6 @@ public/vad/
 .claude/
 AGENTS.md
 CLAUDE.md
+
+# The newest quality-check output (the saved before/after runs in evals/results are kept)
+evals/results/latest.*

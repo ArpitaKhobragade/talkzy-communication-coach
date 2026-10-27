@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding } from "./helpers";
+import { completeOnboarding, openFullReport } from "./helpers";
 
 // Chromium's built-in fake camera (a moving test pattern, no person) lets us check that the
 // on-device MediaPipe pipeline really loads its WASM + models and runs on live video frames
@@ -40,6 +40,7 @@ test("camera analysis loads on-device models, runs, and reports observations wit
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 60_000 });
 
+  await openFullReport(page);
   const body = page.getByRole("heading", { name: /3\. Camera/ }).locator("xpath=ancestor::section");
   await expect(body).toContainText(/What to fix/);
   await expect(body).toContainText(/How to fix it/);

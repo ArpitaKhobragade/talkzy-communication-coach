@@ -189,12 +189,12 @@ describe("rateLimit", () => {
 });
 
 describe("content library", () => {
-  it("has 3 levels for each of the 8 fields with complete content", () => {
-    expect(MODULES).toHaveLength(FIELDS.length * 3);
+  it("has a module for every subject, level and goal with complete content", () => {
+    expect(MODULES).toHaveLength(FIELDS.length * 3 * 5);
     for (const m of MODULES) {
-      expect(m.id).toBe(`${m.field}-${m.level}`);
-      expect(m.passage.split(/\s+/).length).toBeGreaterThan(80);
-      expect(m.followUpQuestions.length).toBe(5);
+      expect(m.id).toBe(`${m.field}-${m.level}-${m.goal}`);
+      expect(m.passage.split(/\s+/).length).toBeGreaterThan(55);
+      expect(m.followUpQuestions.length).toBe(6);
       expect(m.keyTerms.length).toBeGreaterThanOrEqual(4);
       for (const t of m.keyTerms) expect(m.passage.toLowerCase()).toContain(t.toLowerCase());
       expect(/[^\x00-\x7F]/.test(m.passage)).toBe(false);

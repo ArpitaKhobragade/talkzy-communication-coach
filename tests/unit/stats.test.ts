@@ -79,19 +79,29 @@ describe("trendSeries", () => {
 describe("recommendNext", () => {
   it("starts from the profile with no history", () => {
     const r = recommendNext(profile, []);
-    expect(r.module.id).toBe("computer-science-beginner");
+    expect(r.module.id).toBe("computer-science-beginner-confidence");
     expect(r.goal).toBe("confidence");
   });
 
-  it("focuses on fluency when fillers are high, citing the real number", () => {
+  it("keeps the goal from the profile and cites the real filler number", () => {
     const r = recommendNext(profile, [session(2, { fillerPer100: 6, avgAnswerWords: 50 }), session(1, { fillerPer100: 4, avgAnswerWords: 50 })]);
-    expect(r.goal).toBe("fluency");
+    expect(r.goal).toBe("confidence");
+    expect(r.module.goal).toBe("confidence");
     expect(r.reason).toContain("5.0");
   });
 
-  it("focuses on clarity for short answers", () => {
+  it("gives a tip for short answers without changing the goal", () => {
     const r = recommendNext(profile, [session(1, { fillerPer100: 0.5, avgAnswerWords: 12 })]);
-    expect(r.goal).toBe("clarity");
+    expect(r.goal).toBe("confidence");
+    expect(r.reason).toContain("12 words");
+  });
+
+  it("always recommends a module for the profile's subject and goal", () => {
+    for (const g of ["fluency", "clarity", "vocabulary", "confidence", "interview"] as const) {
+      const r = recommendNext({ ...profile, goal: g }, []);
+      expect(r.module.field).toBe(profile.field);
+      expect(r.module.goal).toBe(g);
+    }
   });
 
   it("steps up a level after two strong sessions and prefers a fresh module", () => {

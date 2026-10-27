@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding, completeTypedSession, mockSpeech, profileJson, seedSession } from "./helpers";
+import { completeOnboarding, completeTypedSession, openFullReport, mockSpeech, profileJson, seedSession } from "./helpers";
 
 const VOICE_ANSWERS = [
   "A brand is the promise a company makes to its customers, and I think it matters because people buy from names they trust every single day.",
@@ -24,6 +24,19 @@ test("age gate: under-13 needs guardian confirmation", async ({ page }) => {
   await page.getByLabel(/My parent or guardian has read/).check();
   await page.getByRole("button", { name: "Save and start" }).click();
   await expect(page.getByRole("heading", { name: "Hi Kiran!" })).toBeVisible();
+});
+
+test("emojis cannot be typed in the name, and the dashboard greeting has no subject line", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForURL(/\/onboarding/);
+  const nameInput = page.getByLabel("First name or nickname");
+  await nameInput.fill("Arpita 😀🔥");
+  await expect(nameInput).toHaveValue("Arpita ");
+  await page.getByRole("radio", { name: /18 or older/ }).check();
+  await page.getByLabel(/I have read how my voice/).check();
+  await page.getByRole("button", { name: "Save and start" }).click();
+  await expect(page.getByRole("heading", { name: "Hi Arpita!" })).toBeVisible();
+  await expect(page.getByText("School & Everyday Topics")).toHaveCount(0);
 });
 
 test("full voice journey with mocked speech APIs: read, converse, report, history", async ({ page }) => {
@@ -61,6 +74,7 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
   await expect(page.getByText("Development mode").first()).toBeVisible();
   await expect(page.getByText("AI-written feedback is not available for this session")).toBeVisible();
+  await openFullReport(page);
   await expect(page.getByText(/words per minute/).first()).toBeVisible(); // pace measured from voice turns
   await expect(page.getByRole("heading", { name: /3\. Camera/ })).toBeVisible();
   await expect(page.getByText(/camera was off/i)).toBeVisible();
@@ -114,7 +128,15 @@ test("typed session saves, then privacy controls delete it", async ({ page }) =>
   await completeTypedSession(page);
   await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
 
-  // Simple-language report: what went well / what to fix / how to fix it, and a "say it like this" example.
+  // The short report comes first: what went well, what to fix, one example and one task to practise.
+  const quick = page.getByTestId("quick-report");
+  await expect(quick.getByRole("heading", { name: "What went well" })).toBeVisible();
+  await expect(quick.getByRole("heading", { name: "What to fix" })).toBeVisible();
+  await expect(quick.getByRole("heading", { name: "Practise today" })).toBeVisible();
+  expect((await quick.innerText()).split(/s+/).length).toBeLessThan(220); // short: well under a page
+
+  // The long sections are still there, folded under "See the full report".
+  await openFullReport(page);
   await expect(page.getByRole("heading", { name: /1\. How you did while reading/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Good to know" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Instead of this, say it like this" })).toBeVisible();
@@ -138,8 +160,9 @@ test("typed session saves, then privacy controls delete it", async ({ page }) =>
   for await (const c of txtStream) txtChunks.push(c as Buffer);
   const body = Buffer.concat(txtChunks).toString("utf8");
   expect(body).toMatch(/MY SPEAKING REPORT/);
-  expect(body).toMatch(/Good to know:/);
-  expect(body).toMatch(/Instead of: ".+"\n\s+Say it like this: ".+"/);
+  expect(body).toMatch(/WHAT WENT WELL/);
+  expect(body).toMatch(/PRACTISE TODAY/);
+  expect(body.split("\n").length).toBeLessThan(40); // short enough for one page
   expect(body).toMatch(/Riya/); // the student's name from onboarding
 
   // Delete this single session.
@@ -327,4 +350,29 @@ test("while the report is made a percentage and a progress bar are shown", async
   await expect(bar).toBeVisible();
   await expect(page.getByText(/^\d{1,3}%$/)).toBeVisible();
   await page.waitForURL(/\/report\//, { timeout: 30_000 });
+});
+
+test("each goal has its own modules, and the practice starts with an easy question", async ({ page }) => {
+  await completeOnboarding(page, { field: /Engineering/, level: /Beginner/, goal: /Speak more fluently/ });
+  await page.goto("/library");
+  await expect(page.getByText("A Bicycle Ride, Step by Step")).toBeVisible();
+  await expect(page.getByText("Ravi and the Robot Arm")).toHaveCount(0);
+
+  // Change the goal in the profile: the library shows different modules by itself.
+  await page.goto("/profile");
+  await page.locator("summary", { hasText: "What do you want to improve?" }).click();
+  await page.getByRole("radio", { name: /Prepare for interviews/ }).check();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/Saved\./)).toBeVisible();
+  await page.goto("/library");
+  await expect(page.getByText("Ravi and the Robot Arm")).toBeVisible();
+  await expect(page.getByText("A Bicycle Ride, Step by Step")).toHaveCount(0);
+
+  // The first question is the easy opening question of that module, and it is labelled as a warm-up.
+  await page.goto("/practice/engineering-beginner-interview");
+  await page.getByRole("button", { name: "Begin" }).click();
+  await page.waitForTimeout(3500);
+  await page.getByRole("button", { name: /finished reading/ }).click();
+  await expect(page.getByTestId("coach-message")).toContainText("Can you tell me your name and one thing you like to build or fix?", { timeout: 30_000 });
+  await expect(page.getByTestId("question-level")).toContainText("Question 1: Warm-up question");
 });

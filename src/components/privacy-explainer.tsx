@@ -10,9 +10,10 @@ export function PrivacyExplainer() {
           <dt className="font-semibold">Your voice (microphone)</dt>
           <dd className="text-muted">
             The coach listens only during practice. Your device finds when you are speaking, and short clips of your speech are sent securely to a
-            speech-to-text service (Sarvam AI) through this app&apos;s server, which turns them into text. If that service is not set up, your browser
-            does it instead and, in Chrome and Edge, may send audio to the browser company&apos;s speech service (for example Google or Microsoft). We do
-            not record or save your audio, and the server forwards each clip and forgets it. You can always type your answers instead.
+            speech-to-text service (Sarvam AI) through this app&apos;s server, which turns them into text. To show your words on screen while you are
+            still speaking, your browser also listens and, in Chrome and Edge, may send audio to the browser company&apos;s speech service (for example
+            Google or Microsoft). If the Sarvam service is not set up, your browser does all of it. We do not record or save your audio, and the server
+            forwards each clip and forgets it. You can always type your answers instead.
           </dd>
         </div>
         <div>

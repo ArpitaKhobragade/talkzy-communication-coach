@@ -3,6 +3,7 @@
 import { CaretDown, CheckCircle } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { FIELDS, GOALS, LEVELS, getField, getGoal } from "@/features/content/fields";
+import { cleanName, NAME_MAX, stripName } from "@/features/session/name";
 import type { Profile } from "@/features/session/types";
 import { PrivacyExplainer } from "./privacy-explainer";
 import { Button, Card, Notice } from "./ui";
@@ -110,7 +111,7 @@ export function ProfileForm({
   function submit(e: FormEvent) {
     e.preventDefault();
     const next: Record<string, string> = {};
-    if (!name.trim()) next.name = "Please enter a first name or nickname.";
+    if (!cleanName(name)) next.name = "Please enter a first name or nickname using letters.";
     if (!age) next.age = "Please choose your age group.";
     if (askConsent && !understood) next.consent = "Please confirm that you have read how your information is used.";
     if (askConsent && age === "under13" && !guardian) next.guardian = "A parent or guardian must agree before you can use the app.";
@@ -119,7 +120,7 @@ export function ProfileForm({
     if (Object.keys(next).length || !age) return;
 
     onSubmit({
-      displayName: name.trim().slice(0, 40),
+      displayName: cleanName(name),
       ageBand: age,
       field,
       level,
@@ -137,15 +138,15 @@ export function ProfileForm({
         <input
           id="displayName"
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={40}
+          onChange={(e) => setName(stripName(e.target.value))}
+          maxLength={NAME_MAX}
           autoComplete="off"
           aria-invalid={!!errors.name}
           aria-describedby={errors.name ? "name-error" : "name-help"}
           className="mt-1 min-h-11 w-full max-w-sm rounded-xl border border-line bg-surface px-3"
         />
         <p id="name-help" className="mt-1 text-sm text-muted">
-          Use a first name or nickname only. It is saved on this device.
+          Use a first name or nickname only, with letters. Emojis are not allowed. It is saved on this device.
         </p>
         {errors.name && (
           <p id="name-error" className="mt-1 text-sm font-semibold text-bad">

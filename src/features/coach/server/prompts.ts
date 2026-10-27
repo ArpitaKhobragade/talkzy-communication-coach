@@ -1,6 +1,8 @@
-import { GOAL_QUESTIONS, getGoal } from "../../content/fields";
+import { getGoal } from "../../content/fields";
 import type { LearningModule } from "../../content/types";
 import type { CoachTurnRequest, ReportRequest } from "../../session/types";
+import { DIFFICULTY_GUIDE, difficultyOfQuestion, questionNumberAfter } from "../ladder";
+import { signalLines } from "../signals";
 
 const AGE_TEXT = {
   under13: "a child under 13 (use very simple words and short sentences; be extra gentle)",
@@ -8,8 +10,20 @@ const AGE_TEXT = {
   "18plus": "an adult college student",
 } as const;
 
+/** The question ladder for this module: three easy questions, two medium, then hard ones. Never read out in a list. */
+function questionLadder(m: LearningModule): string {
+  const all = [m.openingQuestion, ...m.followUpQuestions];
+  return [
+    `Easy: ${all.slice(0, 3).join(" | ")}`,
+    `Medium: ${all.slice(3, 5).join(" | ")}`,
+    `Hard: ${all.slice(5).join(" | ")}`,
+  ].join("\n");
+}
+
 export function coachSystemPrompt(m: LearningModule, req: CoachTurnRequest, closing: boolean): string {
-  const goal = getGoal(req.goal);
+  const goal = getGoal(m.goal);
+  const answers = req.history.filter((h) => h.role === "student").length;
+  const next = difficultyOfQuestion(questionNumberAfter(answers));
   return `You are a friendly, encouraging English communication coach having a SPOKEN conversation with a student. Your words will be read aloud by a text-to-speech voice, so write only natural spoken English.
 
 THE STUDENT
@@ -22,12 +36,13 @@ THE READING THE STUDENT JUST DID (field: ${m.title})
 ${m.passage}
 """
 Useful key terms: ${m.keyTerms.join(", ")}.
-Question ideas you may adapt (do not read them out in order): ${m.followUpQuestions.join(" | ")}
-Questions that fit the student's goal (${goal.name}): ${GOAL_QUESTIONS[req.goal].join(" | ")}
+Question ideas for this reading, from easy to hard. Adapt them to what the student just said; never read them out as a list:
+${questionLadder(m)}
 
 HOW TO RESPOND
 - Reply in 1 to 3 short sentences, at most about 45 words. No lists, no markdown, no emojis, no stage directions.
 - First react briefly and specifically to what the student actually said (reference their own words or idea), then ask exactly ONE open follow-up question.
+- QUESTIONS GO FROM EASY TO DIFFICULT. This is question number ${questionNumberAfter(answers)} of the conversation (the opening question was number 1). Questions 1 to 3 are easy, 4 and 5 are medium, and from 6 on they are hard. The question you ask now must be ${DIFFICULTY_GUIDE[next]} Never go back to a much easier kind of question than the one before it, unless the student clearly found the last one too hard (a very short answer, or "I don't know"); then ask a simpler version of the same idea.
 - Base questions on the passage, the subject, and the student's previous answers. Encourage them to explain ideas, give real examples, share opinions and give reasons.
 - Be warm and supportive, like a mentor, never like an examiner. Praise effort and specific good things. Do not correct grammar during the conversation; a written report comes later. If a word is misused, you may naturally use the right word in your reply.
 - If the answer was very short, kindly invite more detail. If it was off topic, gently steer back to the reading.
@@ -69,8 +84,12 @@ RULES
 - Only report grammar errors that clearly occur in the transcript. If there are none or very few, return an empty grammar array; do not invent errors.
 - Do not infer emotions, confidence, personality or honesty. Do not comment on body language (it is handled elsewhere).
 - Do not invent numbers. You may refer to the measured numbers provided; do not recalculate them.
-- Tone: encouraging and respectful, appropriate for the student's age band and level. Always include genuine strengths.
-- "reading": judge the reading phase only from the reading data provided (accuracy, how much was read, pace, words the recogniser missed, or silent reading time). If the student read silently, say what the silent reading time suggests and encourage reading aloud next time. Never claim to assess pronunciation or accent; missed words only mean the recogniser did not hear them clearly (a hint to practise saying them slowly). Praise only what the reading data shows (for example "you read to the end", "your speed was good", "the app understood most of your words"). NEVER say the student understood, enjoyed, or remembered the passage: reading data cannot show that. If silent reading was extremely fast (about 400 words a minute or more), say kindly that they probably skimmed it and should read it more slowly so the talk goes better.
+- Tone: encouraging and respectful, appropriate for the student's age band and level. Include a strength only when it really happened. Never invent praise to be nice.
+- WHAT TO TALK ABOUT FIRST. You are given "Facts found by software". Use them to choose the two most important problems, most important first, in this order: (1) answers that do not answer the question, or give no opinion or reason ("I don't know"); (2) grammar mistakes that repeat; (3) many filler words; (4) very short answers; (5) a plain word used again and again; (6) reading problems. Do not spend a point on something small while a bigger problem exists.
+- STRENGTHS MUST BE TRUE AND SPECIFIC. Each strength names one thing that really happened, with a number, a short quote or a clear fact (for example "You used no filler words", "Your answer 3 gave a reason and an example"). Never write praise that fits every student ("you answered every question", "you tried hard", "good effort"). Never call answers clear, detailed or well explained unless they are. If the session was weak, give one small honest positive from the data, or none.
+- DO NOT INVENT PROBLEMS. If the student did well, give only one improvement and make it a small next step. Never criticise a word that is already simple and correct. "vocabulary.upgrades" must be empty unless a word is wrong, unclear or a very plain word is repeated a lot.
+- Say "the app", never "the recogniser" or "the system".
+- "reading": judge the reading phase only from the reading data provided (accuracy, how much was read, pace, words the app missed, or silent reading time). If the student read silently, say what the silent reading time suggests and encourage reading aloud next time. Never claim to assess pronunciation or accent; missed words only mean the recogniser did not hear them clearly (a hint to practise saying them slowly). Praise only what the reading data shows (for example "you read to the end", "your speed was good", "the app understood most of your words"). NEVER say the student understood, enjoyed, or remembered the passage: reading data cannot show that. If silent reading was extremely fast (about 400 words a minute or more), say kindly that they probably skimmed it and should read it more slowly so the talk goes better.
 - LANGUAGE: write in VERY SIMPLE English, like talking to a 12-year-old who is learning English. Short sentences (under 15 words). Everyday words. No jargon (do not say "articulation", "syntax", "cohesion", "lexical"). Say "you" and speak kindly and directly. Say clearly what went well, what went wrong, and exactly how to fix it.
 - BE BRIEF. The student wants a SHORT report. Every text field is ONE short sentence (under 20 words), never a paragraph. Use the smallest number of items allowed below.
 - Every "improve" item must say exactly what to change and how, in plain words a student can act on today.
@@ -82,8 +101,8 @@ RULES
 OUTPUT: respond with ONLY one JSON object, no prose, no markdown fences, with exactly this shape:
 {
  "headline": string (ONE encouraging sentence summarising the session),
- "strengths": [{"title": string, "detail": string, "quote": string (optional, verbatim)}] (exactly 2 items),
- "improvements": [{"title": string, "detail": string, "quote": string (optional, verbatim), "tip": string}] (exactly 2 items),
+ "strengths": [{"title": string, "detail": string, "quote": string (optional, verbatim)}] (1 or 2 items; use 1 if only one thing was really good),
+ "improvements": [{"title": string, "detail": string, "quote": string (optional, verbatim), "tip": string}] (2 items, most important first; 1 item if the student did very well),
  "grammar": [{"quote": string (verbatim), "issue": string, "suggestion": string}] (0-3 items),
  "vocabulary": {"summary": string, "upgrades": [{"said": string, "tryInstead": string}] (0-2 items)},
  "structure": {"summary": string, "perAnswer": [{"answerNumber": integer, "relevance": 1-5, "completeness": 1-5, "organization": 1-5, "comment": string (under 12 words)}]},
@@ -97,9 +116,9 @@ OUTPUT: respond with ONLY one JSON object, no prose, no markdown fences, with ex
 function readingLine(req: ReportRequest): string {
   const a = req.readingAloud;
   if (a) {
-    const missed = a.missedWords.length ? ` Words the recogniser did not hear clearly: ${a.missedWords.slice(0, 10).join(", ")}.` : "";
+    const missed = a.missedWords.length ? ` Words the app did not hear clearly: ${a.missedWords.slice(0, 10).join(", ")}.` : "";
     const pace = a.wpm !== null ? ` Reading pace about ${a.wpm} words per minute.` : "";
-    return `Reading phase: the student read aloud. The recogniser matched ${a.accuracyPct}% of the words they reached, covering ${a.coveragePct}% of the passage.${pace}${missed}`;
+    return `Reading phase: the student read aloud. The app matched ${a.accuracyPct}% of the words they reached, covering ${a.coveragePct}% of the passage.${pace}${missed}`;
   }
   if (req.readingSec && req.passageWords) {
     const wpm = Math.round(req.passageWords / (req.readingSec / 60));
@@ -122,6 +141,7 @@ export function reportUserPrompt(m: LearningModule, req: ReportRequest): string 
     .join("\n");
 
   const s = req.speech;
+  const facts = signalLines(answers, s, req.readingAloud);
   const measured = {
     voiceAnswers: s.voiceTurns,
     typedAnswers: s.typedTurns,
@@ -149,6 +169,9 @@ ${convo}
 
 Measured values (computed by software; treat as true, null means not measurable): ${JSON.stringify(measured)}
 ${readingLine(req)}
+
+Facts found by software (true; use them to decide what matters most):
+${facts.length ? facts.map((x) => `- ${x}`).join("\n") : "- Nothing stands out as a problem."}
 
 Write the JSON report now.`;
 }

@@ -4,7 +4,7 @@ import { ArrowRight, Clock } from "@phosphor-icons/react";
 import Link from "next/link";
 import { Badge, ButtonLink, Card, PageHeader } from "@/components/ui";
 import { LEVELS, getField, getGoal } from "@/features/content/fields";
-import { MODULES } from "@/features/content/modules";
+import { modulesFor } from "@/features/content/modules";
 import { planSession } from "@/features/progress/daily-limit";
 import { recommendNext } from "@/features/progress/stats";
 import { countWords } from "@/features/speech/metrics";
@@ -12,8 +12,8 @@ import { useNow } from "@/services/use-now";
 import { useHydrated, useProfile, useSessions } from "@/services/use-storage";
 
 /**
- * The library shows only the modules for the subject saved in the student's profile, with their
- * own difficulty first. There is nothing to filter here: the subject, difficulty and goal are
+ * The library shows only the modules for the subject and goal saved in the student's profile, with
+ * their own difficulty first. There is nothing to filter here: the subject, difficulty and goal are
  * changed in the profile, and this page follows automatically.
  */
 export default function LibraryPage() {
@@ -28,7 +28,7 @@ export default function LibraryPage() {
   const field = getField(profile.field);
   const goal = getGoal(profile.goal);
   const levelOrder = (id: string) => LEVELS.findIndex((l) => l.id === id);
-  const list = MODULES.filter((m) => m.field === profile.field).sort((a, b) => {
+  const list = modulesFor(profile.field, profile.goal).sort((a, b) => {
     if (a.level === profile.level) return -1;
     if (b.level === profile.level) return 1;
     return levelOrder(a.level) - levelOrder(b.level);
@@ -38,7 +38,7 @@ export default function LibraryPage() {
     <div className="space-y-6">
       <PageHeader
         title={`${field.name} modules`}
-        subtitle={`Picked for your goal: ${goal.name.toLowerCase()}.`}
+        subtitle={`Made for your goal: ${goal.name.toLowerCase()}. Your own level comes first.`}
         action={
           <Link href="/profile" className="text-sm font-bold text-accent-ink underline-offset-4 hover:underline">
             Change subject or goal in your profile

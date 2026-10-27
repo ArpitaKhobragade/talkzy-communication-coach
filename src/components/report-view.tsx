@@ -11,6 +11,7 @@ import { recommendNext } from "@/features/progress/stats";
 import type { CoachingItem } from "@/features/session/types";
 import { countWords, paceLabel } from "@/features/speech/metrics";
 import { buildReportDocument, documentToText, downloadFile, renderPdf, reportFileName } from "@/features/report/export";
+import { buildQuickReport, type Area } from "@/features/report/quick";
 import { requestReport } from "@/services/coach-api";
 import { deleteSession, saveSession } from "@/services/storage";
 import { useHydrated, useProfile, useSessions } from "@/services/use-storage";
@@ -30,6 +31,17 @@ function Section({ title, subtitle, tag, icon, children }: { title: string; subt
       </div>
       {children}
     </Card>
+  );
+}
+
+/** A small label that says which part of the session a point is about. */
+function AreaTag({ area }: { area: Area }) {
+  const Icon = area === "Reading" ? BookOpenText : area === "Camera" ? Camera : ChatsCircle;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-paper px-2.5 py-0.5 text-xs font-bold text-muted">
+      <Icon size={14} weight="bold" aria-hidden />
+      {area}
+    </span>
   );
 }
 
@@ -198,6 +210,7 @@ export function ReportView({ sessionId }: { sessionId: string }) {
   }
 
   const sayItBetter = s.report.sayItBetter ?? [];
+  const quick = buildQuickReport(s);
 
   /** The written feedback can fail (network, busy AI service). The saved answers are enough to ask again. */
   const canRetryAi =
@@ -285,6 +298,97 @@ export function ReportView({ sessionId }: { sessionId: string }) {
         </Notice>
       )}
 
+      {/* THE SHORT REPORT: everything the student needs at a glance. */}
+      <div className="grid gap-5 lg:grid-cols-2 lg:items-start" data-testid="quick-report">
+        <Card className="space-y-4">
+          <h2 className="flex items-center gap-2 text-xl font-extrabold text-good">
+            <CheckCircle size={24} weight="fill" aria-hidden />
+            What went well
+          </h2>
+          {quick.good.length > 0 ? (
+            <ul className="space-y-3">
+              {quick.good.map((g, i) => (
+                <li key={i} className="space-y-1">
+                  <AreaTag area={g.area} />
+                  <p className="text-[1.02rem] leading-snug">{g.text}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted">Finish a full session to see what went well.</p>
+          )}
+        </Card>
+
+        <Card className="space-y-4">
+          <h2 className="flex items-center gap-2 text-xl font-extrabold text-warn">
+            <TrendUp size={24} weight="fill" aria-hidden />
+            What to fix
+          </h2>
+          {quick.fix.length > 0 ? (
+            <ul className="space-y-3">
+              {quick.fix.map((x, i) => (
+                <li key={i} className="space-y-1 rounded-xl border border-warn/25 bg-warn-soft/50 p-3">
+                  <AreaTag area={x.area} />
+                  <p className="text-[1.02rem] font-bold leading-snug">{x.problem}</p>
+                  {x.quote && <p className="text-[0.95rem] italic leading-snug text-muted">You said: &ldquo;{x.quote}&rdquo;</p>}
+                  {x.how && (
+                    <p className="text-[0.95rem] leading-snug">
+                      <span className="font-extrabold">Try this: </span>
+                      {x.how}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted">Nothing big to fix this time. Keep practising.</p>
+          )}
+        </Card>
+
+        {quick.sayItBetter && (
+          <Card className="space-y-3">
+            <h2 className="flex items-center gap-2 text-xl font-extrabold text-accent-ink">
+              <ChatCircleText size={24} weight="fill" aria-hidden />
+              Say it like this
+            </h2>
+            <p className="flex items-start gap-2 text-[0.95rem]">
+              <XCircle size={20} weight="fill" className="mt-px shrink-0 text-warn" aria-hidden />
+              <span className="italic text-muted">&ldquo;{quick.sayItBetter.said}&rdquo;</span>
+            </p>
+            <p className="flex items-start gap-2 text-[1.02rem]">
+              <CheckCircle size={20} weight="fill" className="mt-px shrink-0 text-good" aria-hidden />
+              <span className="font-bold">&ldquo;{quick.sayItBetter.better}&rdquo;</span>
+            </p>
+          </Card>
+        )}
+
+        {quick.practice && (
+          <Card className="space-y-3">
+            <h2 className="flex items-center gap-2 text-xl font-extrabold text-accent-ink">
+              <Target size={24} weight="fill" aria-hidden />
+              Practise today
+            </h2>
+            <p className="text-[1.02rem] font-bold leading-snug">
+              {quick.practice.title} <span className="text-sm font-normal text-muted">about {quick.practice.minutes} min</span>
+            </p>
+            <p className="text-[0.95rem] leading-snug text-muted">{quick.practice.instructions}</p>
+          </Card>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <ButtonLink href={`/practice/${rec.module.id}`} size="lg">
+          Practise next: {rec.module.title}
+          <ArrowRight size={18} aria-hidden />
+        </ButtonLink>
+        <Link href="/progress" className="inline-flex items-center gap-1.5 font-semibold text-accent-ink underline-offset-4 hover:underline">
+          See your progress
+        </Link>
+      </div>
+
+      <details className="rounded-card border border-line bg-surface p-5" data-testid="full-report">
+        <summary className="cursor-pointer text-lg font-extrabold">See the full report</summary>
+        <div className="mt-6 space-y-6">
       <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
       {/* 1. READING */}
       <Section icon={<BookOpenText size={22} weight="duotone" />} title="1. How you did while reading" subtitle="From your reading-aloud results, or your reading time if you read silently." tag={<SourceTag kind="measured" />}>
@@ -652,12 +756,10 @@ export function ReportView({ sessionId }: { sessionId: string }) {
           <li>Camera numbers describe what a camera can see. They do not show emotion, confidence, personality or honesty.</li>
         </ul>
       </details>
+        </div>
+      </details>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/progress" className="inline-flex items-center gap-1.5 font-semibold text-accent-ink underline-offset-4 hover:underline">
-          See your progress
-          <ArrowRight size={16} aria-hidden />
-        </Link>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {!confirmDelete ? (
           <Button variant="danger" onClick={() => setConfirmDelete(true)}>
             Delete this session
