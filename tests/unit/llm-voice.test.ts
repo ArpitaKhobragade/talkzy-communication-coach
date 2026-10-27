@@ -53,19 +53,19 @@ describe("provider selection", () => {
   });
 });
 
-describe("Groq (gpt-oss-120b)", () => {
+describe("Groq (gpt-oss)", () => {
   it("sends an OpenAI-style request with reasoning hidden and a low effort for chat", async () => {
     vi.stubEnv("GROQ_API_KEY", "gsk-test");
     fetchMock.mockResolvedValue(json({ choices: [{ message: { content: " Hello there. " } }] }));
     const out = await generate({ purpose: "chat", system: "SYS", messages: [{ role: "user", content: "hi" }], maxTokens: 800 });
-    expect(out).toEqual({ text: "Hello there.", model: "openai/gpt-oss-120b" });
+    expect(out).toEqual({ text: "Hello there.", model: "openai/gpt-oss-20b" }); // the conversation uses the smaller, faster model
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.groq.com/openai/v1/chat/completions");
     expect(init.headers.authorization).toBe("Bearer gsk-test");
     const body = JSON.parse(init.body);
     expect(body).toMatchObject({
-      model: "openai/gpt-oss-120b",
+      model: "openai/gpt-oss-20b",
       reasoning_effort: "low",
       include_reasoning: false,
       max_completion_tokens: 800,
@@ -79,11 +79,33 @@ describe("Groq (gpt-oss-120b)", () => {
     fetchMock.mockResolvedValueOnce(json({ choices: [{ message: { content: "{}" } }] }));
     await generate({ purpose: "report", system: "s", messages: [{ role: "user", content: "x" }], maxTokens: 100 });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).reasoning_effort).toBe("low");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe("openai/gpt-oss-120b"); // the report uses the larger model
 
-    fetchMock.mockResolvedValueOnce(json({ error: "nope" }, 429));
+    // The daily allowance is used up (Groq says to wait 15 minutes): fail at once instead of waiting.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "nope" }), { status: 429, headers: { "retry-after": "900" } }));
     await expect(generate({ purpose: "chat", system: "s", messages: [], maxTokens: 10 })).rejects.toThrow(/groq_http_429/);
     fetchMock.mockResolvedValueOnce(json({ choices: [{ message: { content: "" } }] }));
     await expect(generate({ purpose: "chat", system: "s", messages: [], maxTokens: 10 })).rejects.toThrow(/empty/);
+  });
+});
+
+describe("Groq rate limits and models", () => {
+  it("waits a moment and asks again when the per-minute limit is hit", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk-test");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "1" } }));
+    fetchMock.mockResolvedValueOnce(json({ choices: [{ message: { content: "ok after waiting" } }] }));
+    const out = await generate({ purpose: "chat", system: "s", messages: [], maxTokens: 10 });
+    expect(out.text).toBe("ok after waiting");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("can use a separate model for the conversation and for the report", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk-test");
+    vi.stubEnv("GROQ_CHAT_MODEL", "chat-model");
+    vi.stubEnv("GROQ_REPORT_MODEL", "report-model");
+    fetchMock.mockImplementation(async () => json({ choices: [{ message: { content: "hi" } }] }));
+    expect((await generate({ purpose: "chat", system: "s", messages: [], maxTokens: 10 })).model).toBe("chat-model");
+    expect((await generate({ purpose: "report", system: "s", messages: [], maxTokens: 10 })).model).toBe("report-model");
   });
 });
 

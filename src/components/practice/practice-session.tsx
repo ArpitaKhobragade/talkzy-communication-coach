@@ -28,7 +28,7 @@ import { ReadingPhase } from "./reading-phase";
 type Phase = "setup" | "reading" | "conversation" | "finishing" | "save-error";
 type VisionState = "off" | "loading" | "on" | "failed";
 
-export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goalParam?: string }) {
+export function PracticeSession({ moduleId }: { moduleId: string }) {
   const router = useRouter();
   const profile = useProfile();
   const sessions = useSessions();
@@ -61,9 +61,8 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
   const pending = useRef<ReturnType<typeof buildSession> | null>(null);
 
   const lesson = getModule(moduleId);
-  // The goal is set in the profile (and nowhere else), so it is never read from the address.
-  void goalParam;
-  const goal: Goal = profile?.goal ?? "confidence";
+  // Each module is made for one goal, so the practice follows the module the student opened.
+  const goal: Goal = lesson?.goal ?? profile?.goal ?? "confidence";
   // Recomputed when stored sessions load (the first render sees an empty server snapshot).
   const clock = useNow();
   const plan = useMemo(() => planSession(sessions, clock), [sessions, clock]);
@@ -394,7 +393,7 @@ export function PracticeSession({ moduleId, goalParam }: { moduleId: string; goa
                 <span className="font-semibold">Use my microphone for voice answers (recommended)</span>
                 <span className="block text-sm text-muted">
                   {status.stt === "sarvam"
-                    ? "Short clips of your speech are sent securely to a speech service (Sarvam AI) to be turned into text, then discarded. They are not saved."
+                    ? "Short clips of your speech are sent securely to a speech service (Sarvam AI) to be turned into text, then discarded. Your browser also shows your words live while you speak. Nothing is saved."
                     : "Speech is turned into text by your browser, which may use the browser company's speech service."}{" "}
                   Use headphones to stop the coach&apos;s voice being picked up.
                 </span>

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { getModule } from "../../src/features/content/modules";
-import { completeOnboarding } from "./helpers";
+import { completeOnboarding, openFullReport } from "./helpers";
 
 // Cloud mode: Silero VAD (real, in the browser) + Sarvam speech-to-text + Cartesia voice + Groq LLM.
 // The three services are local mocks (tests/e2e/mock-services.mjs), and the "microphone" plays a
@@ -54,6 +54,7 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   await page.waitForURL(/\/report\//, { timeout: 90_000 });
 
   // AI-written report: reading + answers + camera sections, quotes verified against the transcript.
+  await openFullReport(page);
   await expect(page.getByText("AI-written feedback").first()).toBeVisible();
   await expect(page.getByText("You explained your ideas clearly today.")).toBeVisible();
   await expect(page.getByRole("heading", { name: /1\. How you did while reading/ })).toBeVisible();
@@ -82,7 +83,9 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   expect(log.tts.length).toBeGreaterThanOrEqual(2);
   expect(log.tts[0]).toMatchObject({ authorization: "Bearer test-cartesia", model: "sonic-3.6", voiceId: "test-voice-id", container: "mp3" });
   const chats = log.chat as { model: string; reasoning_effort: string; include_reasoning: boolean; isReport: boolean; authorization: string }[];
-  expect(chats.every((c) => c.model === "openai/gpt-oss-120b" && c.include_reasoning === false && c.authorization === "Bearer test-groq")).toBe(true);
+  expect(chats.filter((c) => !c.isReport).every((c) => c.model === "openai/gpt-oss-20b")).toBe(true); // conversation: smaller, faster model
+  expect(chats.filter((c) => c.isReport).every((c) => c.model === "openai/gpt-oss-120b")).toBe(true); // report: larger, more accurate model
+  expect(chats.every((c) => c.include_reasoning === false && c.authorization === "Bearer test-groq")).toBe(true);
   expect(chats.find((c) => !c.isReport)?.reasoning_effort).toBe("low");
   expect(chats.find((c) => c.isReport)?.reasoning_effort).toBe("low");
 
@@ -113,4 +116,50 @@ test("cloud speech failure never dead-ends: falls back or offers retry, typing a
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 90_000 });
   await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
+});
+
+test("live words appear while you speak, before the accurate transcript arrives", async ({ page, request }) => {
+  // The speech service answers 7 seconds late. The browser's own recogniser (faked here) supplies the live words.
+  await request.post(`${MOCK}/__mode`, { data: { stt: "slow" } });
+  await page.addInitScript(() => {
+    class LiveRecognition {
+      lang = "en-IN";
+      continuous = true;
+      interimResults = true;
+      maxAlternatives = 1;
+      onresult: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      private timer: ReturnType<typeof setTimeout> | undefined;
+      start() {
+        this.timer = setTimeout(() => {
+          const r = Object.assign([{ transcript: "these are my live words", confidence: 0 }], { isFinal: false });
+          this.onresult?.({ resultIndex: 0, results: { length: 1, 0: r } });
+        }, 600);
+      }
+      stop() {
+        clearTimeout(this.timer);
+      }
+      abort() {
+        clearTimeout(this.timer);
+      }
+    }
+    const w = window as unknown as Record<string, unknown>;
+    w.SpeechRecognition = LiveRecognition;
+    w.webkitSpeechRecognition = LiveRecognition;
+  });
+
+  await completeOnboarding(page);
+  await startPractice(page);
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByLabel("Reading passage")).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(3500);
+  await page.getByRole("button", { name: /finished reading/ }).click();
+  await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 30_000 });
+
+  const live = page.getByTestId("live-transcript");
+  await expect(live).toContainText("these are my live words", { timeout: 30_000 });
+  // The accurate transcript replaces the live words once it arrives.
+  await expect(live).toContainText(/A brand is the promise a company makes/, { timeout: 60_000 });
+  await expect(live).not.toContainText("these are my live words");
 });

@@ -103,3 +103,23 @@ describe("buildBodyLanguageCoaching", () => {
     expect(text).toMatch(/says nothing about how you feel/);
   });
 });
+
+describe("reading and variety praise must be true", () => {
+  const reading = (accuracyPct: number, missedWords: string[], coveragePct = 100) => ({
+    mode: "aloud" as const,
+    durationSec: 60,
+    aloud: { accuracyPct, coveragePct, wpm: 130, spokenWordCount: 90, missedWords },
+  });
+
+  it("does not say 'you read clearly' when several words were skipped", () => {
+    const items = buildReadingCoaching(reading(94, ["writes", "button", "through", "cables"]), 100);
+    expect(items.some((i) => i.kind === "good" && /clearly/.test(i.observation))).toBe(false);
+    const fix = items.find((i) => i.kind === "improve" && i.topic === "Words to practise");
+    expect(fix?.observation).toMatch(/writes, button, through, cables/);
+  });
+
+  it("praises the percentage only when almost no words were missed", () => {
+    const items = buildReadingCoaching(reading(98, ["cables"]), 100);
+    expect(items.find((i) => i.kind === "good")?.observation).toBe("The app understood 98% of the words you read.");
+  });
+});
