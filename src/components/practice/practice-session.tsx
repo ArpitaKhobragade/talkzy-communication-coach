@@ -18,7 +18,7 @@ import { VisionAnalyzer } from "@/features/vision/analyzer";
 import { requestReport } from "@/services/coach-api";
 import { newId, saveSession } from "@/services/storage";
 import { VadSession } from "@/features/speech/vad-session";
-import { DevModeBanner, useServerStatus } from "@/services/use-coach-mode";
+import { useServerStatus } from "@/services/use-coach-mode";
 import { useNow } from "@/services/use-now";
 import { useHydrated, useProfile, useSessions, useSettings } from "@/services/use-storage";
 import { CameraPreview } from "./camera-preview";
@@ -196,6 +196,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
       startProgress();
       active.current = false; // a model that finishes loading from now on is discarded
       const visionMetrics = analyzerRef.current?.stop() ?? null;
+      const cameraOn = !!camRef.current;
       analyzerRef.current?.dispose();
       analyzerRef.current = null;
       void vadRef.current?.destroy();
@@ -249,6 +250,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
         reading: readingRef.current.reading,
         turns: r.turns,
         vision: visionMetrics,
+        cameraOn,
         keepTranscript: settings.keepTranscripts,
         ai,
         aiReason,
@@ -302,7 +304,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
     return (
       <div className="mx-auto max-w-xl space-y-5 pt-16 text-center">
         <h1 className="text-2xl font-bold">Making your report</h1>
-        <p className="text-6xl font-extrabold tabular-nums text-accent-ink" aria-live="off">
+        <p className="text-6xl font-extrabold tabular-nums" aria-live="off">
           {progress}%
         </p>
         <div
@@ -313,7 +315,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
           aria-valuenow={progress}
           className="h-3 w-full overflow-hidden rounded-full bg-line"
         >
-          <div className="h-full rounded-full bg-gradient-to-r from-[#ff9a56] to-[#ff5e7a] transition-[width] duration-200" style={{ width: `${progress}%` }} />
+          <div className="h-full rounded-full bg-black transition-[width] duration-200" style={{ width: `${progress}%` }} />
         </div>
         <p className="text-sm font-semibold text-muted" role="status">
           {progress >= 100 ? "Done!" : progress < 25 ? "Counting your words and pauses..." : progress < 60 ? "Checking your answers..." : "Writing your feedback..."}
@@ -351,7 +353,6 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
       {topBar}
       {phase === "setup" && (
         <div className="mx-auto max-w-5xl space-y-5">
-          <DevModeBanner mode={mode} />
           <Card className="space-y-4">
             <div className="flex flex-wrap gap-2">
               <Badge tone="accent">{lesson.level}</Badge>
@@ -392,10 +393,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
               <span>
                 <span className="font-semibold">Use my microphone for voice answers (recommended)</span>
                 <span className="block text-sm text-muted">
-                  {status.stt === "sarvam"
-                    ? "Short clips of your speech are sent securely to a speech service (Sarvam AI) to be turned into text, then discarded. Your browser also shows your words live while you speak. Nothing is saved."
-                    : "Speech is turned into text by your browser, which may use the browser company's speech service."}{" "}
-                  Use headphones to stop the coach&apos;s voice being picked up.
+                  Your words are turned into text and shown while you speak. Your voice is not saved. Use headphones to stop the coach&apos;s voice being picked up.
                 </span>
                 {!voiceSupported && (
                   <span className="block text-sm font-semibold text-warn">
@@ -407,10 +405,10 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
             <label className="flex gap-3">
               <input type="checkbox" checked={useCam} onChange={(e) => setCamChoice(e.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent)]" />
               <span>
-                <span className="font-semibold">Use my camera for body-language observations (optional)</span>
+                <span className="font-semibold">Use my camera for feedback on my face and body (optional)</span>
                 <span className="block text-sm text-muted">
-                  Analysed on your device only. We note things like whether your face is in view, where your head is turned, and posture. We never
-                  guess your emotions.
+                  Your report will say how you looked, for example nervous, tense or relaxed, and how to look more confident. The video stays on your device
+                  and is never recorded.
                 </span>
               </span>
             </label>

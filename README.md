@@ -31,14 +31,17 @@ Each session has two phases and ends with a report.
 
 While the report is made, a **percentage and progress bar** show how far along it is. With the AI on, it usually takes about **3 seconds**.
 
-The report is short and written in simple English. It shows **what went well** (up to 2 points), **what to fix** (up to 2 points, each with the student's own words and what to try), **one "say it like this" example** and **one thing to practise today**. Tap **See the full report** for the rest.
+When it reaches 100%, the report opens as a **black-and-white PDF** with one **Download PDF** button under it, and nothing else on the page. Phones and other browsers that cannot show a PDF inside a page show the same report as a page, and the button still gives the real PDF.
+
+The report is short and written in simple English, with no tables of numbers. It shows **what went well** (up to 2 points), **what to fix** (up to 2 points, each with the student's own words and what to try), **one "say it like this" example**, **your face and body** (if the camera was on) and **a link to the next module to practise**.
+
+**Your face and body** says how the student came across, in plain words, and how to improve: for example "You looked a little nervous: your eyebrows were raised in a worried way, you blinked a lot", "Your face looked tense" (brows pulled down or lips pressed, which can look serious or angry), unusual faces (a wink, puffed cheeks, tongue out), or "You looked relaxed and friendly". It also covers where the head and face were, posture and movement. These describe how the student **looked** to a listener, from the shape of the face and body, not what they felt.
 
 Points about the reading and the numbers (fillers, pace, how much was read) come from the measurements, so they are always true. The AI's own points are checked too: empty praise such as "you answered every question" is never shown.
 
 - **"Instead of this, say it like this"** takes sentences the student really said and shows a clearer way to say them. Every quote is checked against the transcript on the server, so the coach can never show something the student did not say.
-- Every number is labelled **Measured**, **Calculated** or **AI assessment**.
-- **Download PDF** or **Download as text**. The file is made on the device and nothing is uploaded.
-- If the AI step fails, the report still shows the measured results and a **Try again** button asks for the written feedback again.
+- The PDF is made on the device and nothing is uploaded.
+- If the AI step fails, the report still shows the measured results.
 
 <table>
   <tr>
@@ -81,9 +84,9 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/s
 
 - **Measured:** speaking pace, pauses and thinking time, filler words, repeated words, answer length, word variety, reading accuracy.
 - **AI assessment (live mode):** grammar, vocabulary, structure and relevance, always labelled as the AI's opinion.
-- **Camera (optional, on the device only):** whether the face is in view, head direction, posture, hand and body movement. The video never leaves the device.
+- **Camera (optional, on the device only):** the look of the face (smiling, tense, worried, blinking, unusual faces), whether the face is in view, head direction, posture, hand and body movement. The video never leaves the device. The limits for each look are rough rules (see `LOOK_LIMITS` in `src/features/vision/summarize.ts`) and have not been checked on many real faces.
 - Pronunciation is **not scored**. Filler counts are a lower bound because browser recognisers often drop "um" and "uh".
-- The app **never infers emotion, confidence, personality or honesty** from the camera, and says so in the report.
+- The camera feedback says how the student **looked** (for example nervous or tense). It never claims to know what they felt, how confident they are, or whether they are honest.
 
 ## Tech
 

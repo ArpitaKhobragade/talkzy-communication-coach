@@ -2,69 +2,69 @@ import type { Session } from "../session/types";
 import { buildQuickReport } from "./quick";
 
 /*
- * Turns a saved session into a simple document (a list of blocks). The same blocks are used to
- * make the PDF and the plain-text file, so both always say the same thing. Everything is made on
- * the student's own device: nothing is uploaded.
+ * Turns a saved session into a simple document (a list of blocks). The same blocks make the PDF, the
+ * page that shows the report, and the plain-text file, so they always say the same thing. Everything
+ * is made on the student's own device: nothing is uploaded. The report is black and white only.
  */
-
-export type Tone = "good" | "fix" | "note";
 
 export type DocBlock =
   | { t: "title"; text: string }
   | { t: "meta"; text: string }
   | { t: "h2"; text: string }
-  | { t: "h3"; text: string; tone: Tone }
   | { t: "p"; text: string }
-  | { t: "note"; text: string }
-  | { t: "bullet"; text: string; topic?: string; why?: string; how?: string }
-  | { t: "compare"; said: string; better: string; why?: string };
+  | { t: "bullet"; text: string; topic?: string; how?: string }
+  | { t: "compare"; said: string; better: string }
+  /** A link to a practice module. `url` is the full address, so it also works inside the PDF. */
+  | { t: "link"; text: string; url: string };
 
 export interface ReportContext {
   displayName: string;
-  moduleTitle: string;
-  fieldName: string;
-  goalName: string;
-  /** The recommended next session, if known. */
-  next?: { title: string; level: string; reason: string };
+  /** The module to practise next, as a link. */
+  next?: { title: string; url: string };
 }
 
 export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] {
-  const r = s.report;
-  const ai = r.ai;
   const q = buildQuickReport(s);
   const when = new Date(s.startedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
-  const minutes = Math.max(1, Math.round(s.durationSec / 60));
   const blocks: DocBlock[] = [];
 
   blocks.push({ t: "title", text: "My speaking report" });
-  blocks.push({ t: "meta", text: `${ctx.displayName}  |  ${when}  |  ${minutes} min` });
-  blocks.push({ t: "meta", text: `${ctx.moduleTitle}  |  ${ctx.fieldName}  |  ${s.level}  |  Goal: ${ctx.goalName}` });
+  blocks.push({ t: "meta", text: `${ctx.displayName}  |  ${when}` });
+  blocks.push({ t: "p", text: q.headline });
 
-  if (ai) blocks.push({ t: "p", text: q.headline });
-  else blocks.push({ t: "note", text: `${r.aiUnavailableReason ?? "The written feedback could not be made this time."} The tips below still come from what you really said and did.` });
-
-  if (q.good.length) {
-    blocks.push({ t: "h2", text: "What went well" });
-    blocks.push(...q.good.map((g): DocBlock => ({ t: "bullet", topic: g.area, text: g.text })));
-  }
-  if (q.fix.length) {
+  if (!q.noAnswers) {
+    if (q.good.length) {
+      blocks.push({ t: "h2", text: "What went well" });
+      blocks.push(...q.good.map((g): DocBlock => ({ t: "bullet", topic: g.area, text: g.text })));
+    }
     blocks.push({ t: "h2", text: "What to fix" });
-    blocks.push(...q.fix.map((x): DocBlock => ({ t: "bullet", topic: x.area, text: x.quote ? `${x.problem} You said: "${x.quote}"` : x.problem, how: x.how })));
+    if (q.fix.length) {
+      blocks.push(...q.fix.map((x): DocBlock => ({ t: "bullet", topic: x.area, text: x.quote ? `${x.problem} You said: "${x.quote}"` : x.problem, how: x.how })));
+    } else {
+      blocks.push({ t: "p", text: "Nothing big to fix this time. Keep practising." });
+    }
+    if (q.sayItBetter) {
+      blocks.push({ t: "h2", text: "Instead of this, say it like this" });
+      blocks.push({ t: "compare", said: q.sayItBetter.said, better: q.sayItBetter.better });
+    }
   }
-  if (q.sayItBetter) {
-    blocks.push({ t: "h2", text: "Instead of this, say it like this" });
-    blocks.push({ t: "compare", said: q.sayItBetter.said, better: q.sayItBetter.better });
-  }
-  if (q.practice) {
-    blocks.push({ t: "h2", text: "Practise today" });
-    blocks.push({ t: "bullet", text: `${q.practice.title} (about ${q.practice.minutes} min): ${q.practice.instructions}` });
-  }
-  if (ctx.next) blocks.push({ t: "p", text: `Next session we suggest: ${ctx.next.title} (${ctx.next.level}). ${ctx.next.reason}` });
 
-  if ([...q.good, ...q.fix].some((x) => x.area === "Camera")) {
-    blocks.push({ t: "note", text: "The camera can only see where your face and body are. This says nothing about how you feel, how sure you are, or whether you are telling the truth." });
+  const cam = q.camera;
+  blocks.push({ t: "h2", text: "Your face and body" });
+  if (cam.status === "ok") {
+    if (cam.looked) blocks.push({ t: "p", text: cam.looked });
+    blocks.push(...cam.good.map((text): DocBlock => ({ t: "bullet", text })));
+    blocks.push(...cam.fix.map((x): DocBlock => ({ t: "bullet", text: x.problem, how: x.how })));
+  } else if (cam.status === "unavailable") {
+    blocks.push({ t: "p", text: "The camera could not be used this time, so there is no feedback on your face and body." });
+  } else {
+    blocks.push({ t: "p", text: "The camera was off. Turn it on at the start of your next session to get feedback on how you look and sit." });
   }
-  blocks.push({ t: "note", text: "This report is a guide to help you practise. It is not an exam mark." });
+
+  if (ctx.next) {
+    blocks.push({ t: "h2", text: "Practise next" });
+    blocks.push({ t: "link", text: ctx.next.title, url: ctx.next.url });
+  }
   return blocks;
 }
 
@@ -82,23 +82,18 @@ export function documentToText(blocks: DocBlock[]): string {
       case "h2":
         lines.push("", b.text.toUpperCase(), "-".repeat(b.text.length));
         break;
-      case "h3":
-        lines.push("", `${b.text}:`);
-        break;
       case "p":
         lines.push("", b.text);
         break;
-      case "note":
-        lines.push("", `Note: ${b.text}`);
-        break;
       case "bullet":
         lines.push(`- ${b.topic ? `${b.topic}: ` : ""}${b.text}`);
-        if (b.why) lines.push(`    Why: ${b.why}`);
         if (b.how) lines.push(`    How to fix it: ${b.how}`);
         break;
       case "compare":
         lines.push(`- Instead of: "${b.said}"`, `    Say it like this: "${b.better}"`);
-        if (b.why) lines.push(`    Why: ${b.why}`);
+        break;
+      case "link":
+        lines.push(`- ${b.text}: ${b.url}`);
         break;
     }
   }
@@ -113,16 +108,14 @@ export function pdfSafe(text: string): string {
     .replace(/[–—−]/g, "-")
     .replace(/…/g, "...")
     .replace(/[·•]/g, "-")
-    .replace(/ /g, " ")
+    .replace(/ /g, " ")
     // Anything else outside Latin-1 cannot be drawn by the built-in font.
     .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "");
 }
 
-const INDIGO: [number, number, number] = [79, 70, 229];
-const INK: [number, number, number] = [26, 29, 51];
-const MUTED: [number, number, number] = [86, 95, 122];
-const GOOD: [number, number, number] = [11, 127, 112];
-const FIX: [number, number, number] = [180, 83, 9];
+// The report is black and white only.
+const BLACK: [number, number, number] = [0, 0, 0];
+const GREY: [number, number, number] = [90, 90, 90];
 
 /** Draws the document as an A4 PDF. Runs in the browser (and in Node for tests). Returns the file bytes. */
 export async function renderPdf(blocks: DocBlock[]): Promise<ArrayBuffer> {
@@ -149,93 +142,84 @@ export async function renderPdf(blocks: DocBlock[]): Promise<ArrayBuffer> {
   };
   const text = (
     value: string,
-    opts: { size: number; style?: "normal" | "bold" | "italic"; color?: [number, number, number]; x?: number; width?: number; gap?: number },
+    opts: { size: number; style?: "normal" | "bold" | "italic"; color?: [number, number, number]; x?: number; width?: number; gap?: number; url?: string },
   ) => {
     doc.setFont("helvetica", opts.style ?? "normal");
     doc.setFontSize(opts.size);
-    doc.setTextColor(...(opts.color ?? INK));
+    doc.setTextColor(...(opts.color ?? BLACK));
     const x = opts.x ?? M;
     const lines = doc.splitTextToSize(pdfSafe(value), opts.width ?? bodyW) as string[];
     const lh = lineH(opts.size);
     for (const line of lines) {
       need(lh);
-      doc.text(line, x, y + opts.size * 0.3528);
+      const baseline = y + opts.size * 0.3528;
+      if (opts.url) {
+        doc.textWithLink(line, x, baseline, { url: opts.url });
+        doc.setDrawColor(...BLACK);
+        doc.setLineWidth(0.2);
+        doc.line(x, baseline + 0.7, x + doc.getTextWidth(line), baseline + 0.7);
+      } else {
+        doc.text(line, x, baseline);
+      }
       y += lh;
     }
     y += opts.gap ?? 0;
   };
 
+  doc.setDrawColor(...BLACK);
   for (const b of blocks) {
     switch (b.t) {
       case "title": {
-        doc.setFillColor(...INDIGO);
-        doc.rect(0, 0, W, 26, "F");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(20);
-        doc.setTextColor(255, 255, 255);
-        doc.text(pdfSafe(b.text), M, 16);
-        y = 34;
+        text(b.text, { size: 22, style: "bold", gap: 1 });
+        doc.setLineWidth(0.8);
+        doc.line(M, y, W - M, y);
+        y += 4;
         break;
       }
       case "meta":
-        text(b.text, { size: 10, color: MUTED, gap: 1 });
+        text(b.text, { size: 10, color: GREY, gap: 1 });
         break;
       case "h2":
         y += 5;
-        need(40); // keep the heading together with the first lines under it
-        text(b.text, { size: 14, style: "bold", color: INDIGO, gap: 1 });
-        doc.setDrawColor(225, 228, 240);
+        need(28); // keep the heading together with the first lines under it
+        text(b.text, { size: 14, style: "bold", gap: 1 });
+        doc.setLineWidth(0.3);
         doc.line(M, y, W - M, y);
         y += 3;
-        break;
-      case "h3":
-        y += 2;
-        need(34); // never leave a sub-heading alone at the bottom of a page
-        text(b.text, { size: 11, style: "bold", color: b.tone === "good" ? GOOD : b.tone === "fix" ? FIX : MUTED, gap: 1 });
         break;
       case "p":
         y += 1;
         text(b.text, { size: 10.5, gap: 1.5 });
-        break;
-      case "note":
-        y += 1;
-        text(b.text, { size: 9.5, style: "italic", color: MUTED, gap: 2 });
         break;
       case "bullet": {
         const w = bodyW - 5;
         need(
           (b.topic ? heightOf(b.topic, 10.5, "bold", w) : 0) +
             heightOf(b.text, 10.5, "normal", w) +
-            (b.why ? heightOf(`Why: ${b.why}`, 9.5, "normal", w) : 0) +
             (b.how ? heightOf(`How to fix it: ${b.how}`, 10, "bold", w) : 0) +
             1.5,
         );
-        doc.setFillColor(...INK);
+        doc.setFillColor(...BLACK);
         doc.circle(M + 1.2, y + 2.1, 0.55, "F");
-        if (b.topic) text(b.topic, { size: 10.5, style: "bold", x: M + 5, width: bodyW - 5 });
-        text(b.text, { size: 10.5, x: M + 5, width: bodyW - 5 });
-        if (b.why) text(`Why: ${b.why}`, { size: 9.5, color: MUTED, x: M + 5, width: bodyW - 5 });
-        if (b.how) text(`How to fix it: ${b.how}`, { size: 10, style: "bold", color: GOOD, x: M + 5, width: bodyW - 5 });
+        if (b.topic) text(b.topic, { size: 10.5, style: "bold", x: M + 5, width: w });
+        text(b.text, { size: 10.5, x: M + 5, width: w });
+        if (b.how) text(`How to fix it: ${b.how}`, { size: 10, style: "bold", x: M + 5, width: w });
         y += 1.5;
         break;
       }
       case "compare": {
         const cw = bodyW - 5;
-        need(
-          lineH(9) * 2 +
-            heightOf(`"${b.said}"`, 10.5, "italic", cw) +
-            heightOf(`"${b.better}"`, 10.5, "bold", cw) +
-            (b.why ? heightOf(b.why, 9.5, "normal", cw) : 0) +
-            3,
-        );
-        text("Instead of saying:", { size: 9, style: "bold", color: FIX, x: M + 5, width: bodyW - 5 });
-        text(`"${b.said}"`, { size: 10.5, style: "italic", color: MUTED, x: M + 5, width: bodyW - 5, gap: 0.5 });
-        text("Say it like this:", { size: 9, style: "bold", color: GOOD, x: M + 5, width: bodyW - 5 });
-        text(`"${b.better}"`, { size: 10.5, style: "bold", x: M + 5, width: bodyW - 5 });
-        if (b.why) text(b.why, { size: 9.5, color: MUTED, x: M + 5, width: bodyW - 5, gap: 2.5 });
-        else y += 2.5;
+        need(lineH(9) * 2 + heightOf(`"${b.said}"`, 10.5, "italic", cw) + heightOf(`"${b.better}"`, 10.5, "bold", cw) + 3);
+        text("Instead of saying:", { size: 9, style: "bold", x: M + 5, width: cw });
+        text(`"${b.said}"`, { size: 10.5, style: "italic", color: GREY, x: M + 5, width: cw, gap: 0.5 });
+        text("Say it like this:", { size: 9, style: "bold", x: M + 5, width: cw });
+        text(`"${b.better}"`, { size: 10.5, style: "bold", x: M + 5, width: cw, gap: 2.5 });
         break;
       }
+      case "link":
+        y += 1;
+        text(b.text, { size: 11, style: "bold", url: b.url, gap: 1.5 });
+        break;
     }
   }
 
@@ -245,7 +229,7 @@ export async function renderPdf(blocks: DocBlock[]): Promise<ArrayBuffer> {
     doc.setPage(p);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
-    doc.setTextColor(...MUTED);
+    doc.setTextColor(...GREY);
     doc.text(`Talkzy  |  Page ${p} of ${pages}`, W / 2, H - 8, { align: "center" });
   }
   return doc.output("arraybuffer");

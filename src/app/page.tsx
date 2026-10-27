@@ -7,7 +7,6 @@ import { Badge, ButtonLink, Card, EmptyState, IconChip, Notice, PageHeader, Stat
 import { getGoal } from "@/features/content/fields";
 import { currentStreak, DAILY_LIMIT_SEC, minutesPerDay, planSession } from "@/features/progress/daily-limit";
 import { recommendNext } from "@/features/progress/stats";
-import { DevModeBanner, useCoachMode } from "@/services/use-coach-mode";
 import { useNow } from "@/services/use-now";
 import { useHydrated, useProfile, useSessions } from "@/services/use-storage";
 
@@ -15,7 +14,6 @@ export default function DashboardPage() {
   const profile = useProfile();
   const sessions = useSessions();
   const hydrated = useHydrated();
-  const mode = useCoachMode();
   const now = useNow();
   if (!profile || !hydrated) return null;
 
@@ -39,7 +37,6 @@ export default function DashboardPage() {
           </Badge>
         }
       />
-      <DevModeBanner mode={mode} />
 
       {/* Today: the daily 20-minute allowance and the one thing to do next. */}
       <Card className="grid overflow-hidden !p-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
@@ -124,8 +121,7 @@ export default function DashboardPage() {
             <div>
               <p className="font-semibold">{new Date(last.startedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</p>
               <p className="text-sm text-muted">
-                {Math.round(last.durationSec / 60)} min · {last.speech.totalWords} words spoken or typed ·{" "}
-                {last.mode === "live" ? "AI coach" : "Development mode"}
+                {Math.round(last.durationSec / 60)} min · {last.speech.totalWords} words spoken or typed
               </p>
             </div>
             <Link href={`/report/${last.id}`} className="inline-flex items-center gap-1.5 font-semibold text-accent-ink underline-offset-4 hover:underline">

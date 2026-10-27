@@ -93,14 +93,19 @@ describe("buildBodyLanguageCoaching", () => {
     expect(all).toMatch(/Sit tall/);
   });
 
-  it("never makes claims about emotion, confidence or honesty", () => {
+  it("says nothing about feelings or honesty when it has no expression scores (sessions saved before they existed)", () => {
     const items = [
       ...buildBodyLanguageCoaching(vision({ facialMovementLevel: "low", movementLevel: "low", handsVisiblePct: 5 })),
       ...buildBodyLanguageCoaching(vision({ facePresentPct: 40, uprightPct: 20, movementLevel: "high" })),
     ];
     const text = items.map((i) => `${i.observation} ${i.why ?? ""} ${i.howTo ?? ""}`).join(" ");
-    expect(text).not.toMatch(/nervous|anxious|confident|confidence|honest|lying|happy|sad|angry|bored|stress|emotion(?!s?\.| on camera)/i);
-    expect(text).toMatch(/says nothing about how you feel/);
+    expect(text).not.toMatch(/nervous|anxious|angry|honest|lying|happy|sad|bored|stress/i);
+  });
+
+  it("uses plain words with no numbers", () => {
+    const items = buildBodyLanguageCoaching(vision({ facePresentPct: 50, cameraFacingPct: 40, avgHeadPitchDeg: 22, avgHeadYawDeg: 28, uprightPct: 30, shoulderTiltDeg: 12, movementLevel: "high" }));
+    const text = items.map((i) => `${i.observation} ${i.why ?? ""} ${i.howTo ?? ""}`).join(" ");
+    expect(text).not.toMatch(/\d/);
   });
 });
 

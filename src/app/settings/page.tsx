@@ -5,7 +5,6 @@ import { useId, useState, type ReactNode } from "react";
 import { Button, Card, Notice, PageHeader } from "@/components/ui";
 import type { Settings } from "@/features/session/types";
 import { clearAllTranscripts, deleteAllData, exportAllData, saveSettings } from "@/services/storage";
-import { DevModeBanner, useCoachMode } from "@/services/use-coach-mode";
 import { useHydrated, useProfile, useSessions, useSettings } from "@/services/use-storage";
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -40,7 +39,6 @@ export default function SettingsPage() {
   const settings = useSettings();
   const sessions = useSessions();
   const hydrated = useHydrated();
-  const mode = useCoachMode();
   const [message, setMessage] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"transcripts" | "all" | null>(null);
   const rateId = useId();
@@ -65,7 +63,6 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader title="Settings and privacy" subtitle="You are in control of your voice, camera and saved data." />
-      <DevModeBanner mode={mode} />
       {message && (
         <Notice tone="good" role="status">
           {message}
@@ -141,8 +138,8 @@ export default function SettingsPage() {
       <Card className="space-y-3 border-bad/30">
         <h2 className="text-lg font-bold text-bad">Delete everything</h2>
         <p className="text-sm text-muted">
-          This removes your profile, settings, every session and every report from this device. It cannot be undone. Individual sessions can be deleted from
-          their report page.
+          This removes your profile, settings, every session and every report from this device. It cannot be undone. Individual reports can be deleted from
+          the Progress page.
         </p>
         {confirm !== "all" ? (
           <Button variant="danger" onClick={() => setConfirm("all")}>

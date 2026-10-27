@@ -331,94 +331,6 @@ export function buildSayItBetter(turns: Turn[]): SayItBetter[] {
   return out.slice(0, 3);
 }
 
-/**
- * What the camera could see, and what to change. It only talks about where your face and body were.
- * It never says anything about feelings, how sure you are, or whether you are telling the truth.
- */
-export function buildBodyLanguageCoaching(v: VisionMetrics | null): CoachingItem[] {
-  if (!v || v.framesAnalyzed < 10) return [];
-  const out: CoachingItem[] = [];
-
-  if (v.facePresentPct < 70) {
-    out.push(
-      item(
-        "improve",
-        "Your face in the picture",
-        `Your face was out of view for ${Math.round(100 - v.facePresentPct)}% of the time.`,
-        "When your face leaves the picture, the listener loses eye contact with you.",
-        "Sit so your whole face stays in the picture. Put a light in front of you (not behind you) and the camera at eye level.",
-      ),
-    );
-  } else {
-    out.push(item("good", "Your face in the picture", `Your face stayed in the picture ${v.facePresentPct}% of the time.`));
-  }
-
-  if (v.cameraFacingPct !== null) {
-    if (v.cameraFacingPct >= 75) {
-      out.push(item("good", "Looking at the camera", `You faced the camera about ${v.cameraFacingPct}% of the time. This helps the listener feel you are talking to them.`));
-    } else {
-      out.push(
-        item(
-          "improve",
-          "Looking at the camera",
-          `Your head was turned away from the camera about ${Math.round(100 - v.cameraFacingPct)}% of the time. (We can see which way your head points. We cannot see exactly where your eyes look.)`,
-          "When you face the person you talk to, they feel you are speaking to them.",
-          "Put your notes or the question close to the camera, so looking at them still faces the camera. Look at the camera lens when you start and finish each point.",
-        ),
-      );
-    }
-  }
-  if (v.avgHeadPitchDeg !== null && v.avgHeadPitchDeg >= 15) {
-    out.push(item("improve", "Head up and down", `Your head was tilted up or down by about ${Math.round(v.avgHeadPitchDeg)} degrees on average.`, "Looking down at a low screen hides your face and can hurt your neck.", "Raise your laptop or camera to eye level so you can look straight ahead."));
-  }
-  if (v.avgHeadYawDeg !== null && v.avgHeadYawDeg >= 20) {
-    out.push(item("improve", "Head turned to the side", `Your head was turned to the side by about ${Math.round(v.avgHeadYawDeg)} degrees on average.`, undefined, "Sit straight in front of the screen and the camera, not at an angle."));
-  }
-
-  if (v.facialMovementLevel === "low") {
-    out.push(
-      item(
-        "improve",
-        "Your face while talking",
-        "Your face did not move much while you spoke. (This only measures how much your face changed on camera. It says nothing about how you feel.)",
-        "A face that moves a little, like a smile or raised eyebrows, helps people follow your ideas and feel welcome.",
-        "Smile when you say hello and goodbye. Let your eyebrows go up when you say something important. Practise one answer in front of a mirror.",
-      ),
-    );
-  } else if (v.facialMovementLevel === "moderate") {
-    out.push(item("good", "Your face while talking", "Your face moved in a natural way while you spoke."));
-  } else if (v.facialMovementLevel === "high") {
-    out.push(item("info", "Your face while talking", "Your face moved a lot. That is normal, because your mouth moves when you talk.", undefined, "Keep it natural. When the coach is asking a question, keep your face calm and listen."));
-  }
-
-  if (v.uprightPct !== null) {
-    if (v.uprightPct >= 75) {
-      out.push(item("good", "How you sat", `You sat upright and balanced about ${v.uprightPct}% of the time.`));
-    } else {
-      const tilt = v.shoulderTiltDeg !== null && v.shoulderTiltDeg >= 8 ? ` Your shoulders were tilted by about ${Math.round(v.shoulderTiltDeg)} degrees on average.` : "";
-      out.push(
-        item(
-          "improve",
-          "How you sat",
-          `You sat upright and balanced only ${v.uprightPct}% of the time.${tilt}`,
-          "Sitting tall helps your voice come out clearly, and you look steady on camera.",
-          "Sit tall with both feet flat on the floor. Relax your shoulders and keep them level. Sit in the middle of the picture and do not lean to one side.",
-        ),
-      );
-    }
-  } else if (v.bodyVisiblePct < 30) {
-    out.push(item("info", "How you sat", "Your shoulders were rarely in view, so we could not check how you sat.", undefined, "Move your chair back a little so your head and both shoulders fit in the picture."));
-  }
-
-  if (v.movementLevel === "high") {
-    out.push(item("improve", "Your body and hands", "You moved a lot during the session.", "A lot of movement can pull attention away from what you say.", "Rest your hands on the desk between gestures. Keep your body still while you make a point."));
-  } else if (v.movementLevel === "low" && v.handsVisiblePct !== null && v.handsVisiblePct < 15) {
-    out.push(item("info", "Your body and hands", "Your hands were hardly seen, and you stayed very still.", "Small hand movements can help people follow your ideas.", "Try one or two small hand movements when you explain an example. Keep your hands inside the picture."));
-  } else if (v.movementLevel === "moderate") {
-    out.push(item("good", "Your body and hands", "Your body movement looked natural."));
-  }
-  return out;
-}
 
 export function buildFallbackExercises(speech: SpeechMetrics, goal: Goal): Exercise[] {
   const out: Exercise[] = [];
@@ -451,3 +363,5 @@ export function buildFallbackExercises(speech: SpeechMetrics, goal: Goal): Exerc
   }
   return out.slice(0, 4);
 }
+
+export { buildBodyLanguageCoaching } from "./body-language";

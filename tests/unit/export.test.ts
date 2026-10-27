@@ -11,7 +11,7 @@ const vision: VisionMetrics = {
   facialMovementIndex: 0.005, facialMovementLevel: "low",
 };
 
-const session = (over: { keepTranscript?: boolean; withVision?: boolean } = {}) =>
+const session = (over: { keepTranscript?: boolean; withVision?: boolean; cameraOn?: boolean; answers?: boolean } = {}) =>
   buildSession({
     id: "s1",
     startedAt: new Date(2026, 9, 26, 10, 30).getTime(),
@@ -25,13 +25,17 @@ const session = (over: { keepTranscript?: boolean; withVision?: boolean } = {}) 
     readingSec: 100,
     passageWords: 160,
     reading: { mode: "aloud", durationSec: 100, aloud: { accuracyPct: 82, coveragePct: 95, wpm: 140, spokenWordCount: 140, missedWords: ["passphrase", "authentication"] } },
-    turns: [
-      turn("coach", "Why are long passwords better?"),
-      turn("student", "um I think basically a long password is harder to guess because it has more combinations you know", { inputMode: "voice", speakingSec: 9, pauseCount: 1, longestPauseSec: 1.4, latencySec: 2 }),
-      turn("coach", "Can you give an example?"),
-      turn("student", "Passwords keep accounts safe", { inputMode: "voice", speakingSec: 3, pauseCount: 0, longestPauseSec: 0, latencySec: 2.2 }),
-    ],
+    turns:
+      over.answers === false
+        ? [turn("coach", "Why are long passwords better?")]
+        : [
+            turn("coach", "Why are long passwords better?"),
+            turn("student", "um I think basically a long password is harder to guess because it has more combinations you know", { inputMode: "voice", speakingSec: 9, pauseCount: 1, longestPauseSec: 1.4, latencySec: 2 }),
+            turn("coach", "Can you give an example?"),
+            turn("student", "Passwords keep accounts safe", { inputMode: "voice", speakingSec: 3, pauseCount: 0, longestPauseSec: 0, latencySec: 2.2 }),
+          ],
     vision: over.withVision === false ? null : vision,
+    cameraOn: over.cameraOn,
     keepTranscript: over.keepTranscript ?? true,
     ai: null,
     aiReason: "Development mode: no AI key.",
@@ -39,18 +43,26 @@ const session = (over: { keepTranscript?: boolean; withVision?: boolean } = {}) 
 
 const ctx: ReportContext = {
   displayName: "Asha",
-  moduleTitle: "Strong Passwords and Staying Safe Online",
-  fieldName: "Computer Science & Technology",
-  goalName: "Explain ideas clearly",
-  next: { title: "How a Startup Tests a New Idea", level: "intermediate", reason: "Keep the habit going." },
+  next: { title: "How a Startup Tests a New Idea", url: "https://talkzy.test/practice/business-marketing-intermediate-clarity" },
 };
 
 const headings = (blocks: DocBlock[]) => blocks.filter((b) => b.t === "h2").map((b) => (b as { text: string }).text);
+const section = (blocks: DocBlock[], title: string) => {
+  const i = blocks.findIndex((b) => b.t === "h2" && b.text === title);
+  const rest = blocks.slice(i + 1);
+  const end = rest.findIndex((b) => b.t === "h2");
+  return end < 0 ? rest : rest.slice(0, end);
+};
 
 describe("buildReportDocument", () => {
-  it("is the short report: what went well, what to fix, say it like this, practise today", () => {
-    const h = headings(buildReportDocument(session(), ctx));
-    expect(h).toEqual(["What went well", "What to fix", "Instead of this, say it like this", "Practise today"]);
+  it("has what went well, what to fix, say it like this, your face and body, and a practice link", () => {
+    expect(headings(buildReportDocument(session(), ctx))).toEqual([
+      "What went well",
+      "What to fix",
+      "Instead of this, say it like this",
+      "Your face and body",
+      "Practise next",
+    ]);
   });
 
   it("says what to fix and how to fix it", () => {
@@ -59,17 +71,11 @@ describe("buildReportDocument", () => {
     expect(text).toMatch(/How to fix it:/);
   });
 
-  it("shows at most two points of each kind", () => {
+  it("shows at most two points of each kind for the words", () => {
     const blocks = buildReportDocument(session(), ctx);
-    const section = (title: string) => {
-      const i = blocks.findIndex((b) => b.t === "h2" && b.text === title);
-      const rest = blocks.slice(i + 1);
-      const end = rest.findIndex((b) => b.t === "h2");
-      return (end < 0 ? rest : rest.slice(0, end)).filter((b) => b.t === "bullet");
-    };
-    expect(section("What went well").length).toBeLessThanOrEqual(2);
-    expect(section("What to fix").length).toBeLessThanOrEqual(2);
-    expect(section("What to fix").length).toBeGreaterThan(0);
+    expect(section(blocks, "What went well").filter((b) => b.t === "bullet").length).toBeLessThanOrEqual(2);
+    expect(section(blocks, "What to fix").filter((b) => b.t === "bullet").length).toBeLessThanOrEqual(2);
+    expect(section(blocks, "What to fix").filter((b) => b.t === "bullet").length).toBeGreaterThan(0);
   });
 
   it("includes one 'instead of this, say it like this' from the student's own words", () => {
@@ -81,18 +87,39 @@ describe("buildReportDocument", () => {
     expect(documentToText(blocks)).toMatch(/Say it like this:/);
   });
 
-  it("is short: no transcript, no long sections, about one page", () => {
+  it("is short: no transcript, no long sections, no explanations or notes", () => {
     const text = documentToText(buildReportDocument(session({ keepTranscript: true }), ctx));
     expect(text).not.toMatch(/what was said/i);
     expect(text).not.toMatch(/How you did while/);
-    expect(text.split("\n").length).toBeLessThan(40);
+    expect(text).not.toMatch(/observations of visible cues|how these results were measured|not an exam mark|Development mode|AI-written/i);
+    expect(text.split("\n").length).toBeLessThan(60);
   });
 
-  it("explains why AI feedback is missing and names the student and topic", () => {
-    const text = documentToText(buildReportDocument(session(), ctx));
-    expect(text).toMatch(/Development mode: no AI key./);
-    expect(text).toContain("Asha");
-    expect(text).toContain("Strong Passwords and Staying Safe Online");
+  it("names the student and ends with only a link to the next module, with no explanation", () => {
+    const blocks = buildReportDocument(session(), ctx);
+    expect(documentToText(blocks)).toContain("Asha");
+    const practise = section(blocks, "Practise next");
+    expect(practise).toEqual([{ t: "link", text: "How a Startup Tests a New Idea", url: "https://talkzy.test/practice/business-marketing-intermediate-clarity" }]);
+    expect(documentToText(blocks)).toContain("https://talkzy.test/practice/business-marketing-intermediate-clarity");
+  });
+
+  it("tells the student when the camera was off or could not be used", () => {
+    const off = documentToText(buildReportDocument(session({ withVision: false, cameraOn: false }), ctx));
+    expect(off).toMatch(/camera was off/i);
+    const failed = documentToText(buildReportDocument(session({ withVision: false, cameraOn: true }), ctx));
+    expect(failed).toMatch(/camera could not be used/i);
+  });
+
+  it("with no answers, says so and skips the sections about the words", () => {
+    const blocks = buildReportDocument(session({ answers: false }), ctx);
+    expect(headings(blocks)).toEqual(["Your face and body", "Practise next"]);
+    expect(documentToText(blocks)).toMatch(/did not hear any answers/i);
+  });
+
+  it("puts what the camera saw in the report", () => {
+    const blocks = buildReportDocument(session(), ctx);
+    const face = section(blocks, "Your face and body");
+    expect(face.some((b) => b.t === "bullet" && /very still/i.test(b.text))).toBe(true);
   });
 });
 
@@ -112,6 +139,12 @@ describe("renderPdf", () => {
     const bytes = new Uint8Array(await renderPdf(buildReportDocument(session(), ctx)));
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
     expect(bytes.length).toBeGreaterThan(2000);
+  });
+
+  it("makes the practice module a clickable link inside the PDF", async () => {
+    const bytes = new Uint8Array(await renderPdf(buildReportDocument(session(), ctx)));
+    const raw = new TextDecoder("latin1").decode(bytes);
+    expect(raw).toContain("/URI (https://talkzy.test/practice/business-marketing-intermediate-clarity)");
   });
 
   it("adds pages for long content and numbers them", async () => {

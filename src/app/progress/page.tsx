@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { BarChart, LineChart } from "@/components/charts";
-import { Badge, ButtonLink, Card, EmptyState, PageHeader, Stat } from "@/components/ui";
+import { Badge, Button, ButtonLink, Card, EmptyState, PageHeader, Stat } from "@/components/ui";
 import { getGoal } from "@/features/content/fields";
 import { getModule } from "@/features/content/modules";
 import { currentStreak, minutesPerDay } from "@/features/progress/daily-limit";
 import { progressInsights, recommendNext, trendSeries } from "@/features/progress/stats";
+import { deleteSession } from "@/services/storage";
 import { useNow } from "@/services/use-now";
 import { useHydrated, useProfile, useSessions } from "@/services/use-storage";
 
@@ -43,6 +45,7 @@ export default function ProgressPage() {
   const sessions = useSessions();
   const hydrated = useHydrated();
   const now = useNow();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   if (!profile || !hydrated) return null;
 
   const completed = sessions.filter((s) => s.completed);
@@ -147,13 +150,28 @@ export default function ProgressPage() {
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <Badge>{s.level}</Badge>
-                          <Badge tone={s.mode === "live" ? "good" : "warn"}>{s.mode === "live" ? "AI coach" : "Dev mode"}</Badge>
-                          {!s.completed && <Badge tone="warn">Short session</Badge>}
                         </div>
                       </div>
-                      <Link href={`/report/${s.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
-                        Open report
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-4">
+                        <Link href={`/report/${s.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
+                          Open report
+                        </Link>
+                        {confirmDelete === s.id ? (
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold">Delete this report?</span>
+                            <Button variant="danger" className="min-h-10 px-4" onClick={() => { deleteSession(s.id); setConfirmDelete(null); }}>
+                              Yes, delete
+                            </Button>
+                            <Button variant="secondary" className="min-h-10 px-4" onClick={() => setConfirmDelete(null)}>
+                              Cancel
+                            </Button>
+                          </span>
+                        ) : (
+                          <Button variant="danger" className="min-h-10 px-4" onClick={() => setConfirmDelete(s.id)}>
+                            Delete
+                          </Button>
+                        )}
+                      </div>
                     </Card>
                   </li>
                 );

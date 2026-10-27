@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding, completeTypedSession, openFullReport, mockSpeech, profileJson, seedSession } from "./helpers";
+import { completeOnboarding, completeTypedSession, mockSpeech, profileJson, reportPaper, seedSession, showReportAsPage } from "./helpers";
 
 const VOICE_ANSWERS = [
   "A brand is the promise a company makes to its customers, and I think it matters because people buy from names they trust every single day.",
@@ -40,12 +40,13 @@ test("emojis cannot be typed in the name, and the dashboard greeting has no subj
 });
 
 test("full voice journey with mocked speech APIs: read, converse, report, history", async ({ page }) => {
+  await showReportAsPage(page);
   await mockSpeech(page, VOICE_ANSWERS);
   await completeOnboarding(page);
 
   // Dashboard recommends a marketing module (personalised to the chosen field).
   await expect(page.getByText("Recommended for you")).toBeVisible();
-  await expect(page.getByText(/Development mode: no AI key configured/)).toBeVisible();
+  await expect(page.getByText(/Development mode/)).toHaveCount(0);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
 
   // Setup -> permissions -> reading.
@@ -70,24 +71,28 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 30_000 });
   await page.waitForURL(/\/report\//, { timeout: 170_000 });
 
-  // Report.
-  await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
-  await expect(page.getByText("Development mode").first()).toBeVisible();
-  await expect(page.getByText("AI-written feedback is not available for this session")).toBeVisible();
-  await openFullReport(page);
-  await expect(page.getByText(/words per minute/).first()).toBeVisible(); // pace measured from voice turns
-  await expect(page.getByRole("heading", { name: /3\. Camera/ })).toBeVisible();
-  await expect(page.getByText(/camera was off/i)).toBeVisible();
-  await page.getByText("Show what was said").click();
-  await expect(page.getByText(/A brand is the promise a company makes/).first()).toBeVisible();
+  // The report is the PDF (drawn as a page here) with a download button, and nothing else.
+  await expect(reportPaper(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+  const paper = reportPaper(page);
+  await expect(paper).toContainText("My speaking report");
+  await expect(paper).toContainText("Riya");
+  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
+  await expect(paper).toContainText(/camera was off/i);
+  await expect(paper.getByRole("heading", { name: "Practise next" })).toBeVisible();
+  await expect(paper.getByRole("link").first()).toHaveAttribute("href", /\/practice\//);
+  for (const gone of [/Development mode/, /AI-written feedback/, /This was a short session/, /See the full report/, /How these results were measured/, /All the numbers/, /More detail/]) {
+    await expect(page.getByText(gone)).toHaveCount(0);
+  }
 
   // History and progress.
-  await page.getByRole("link", { name: "See your progress" }).click();
+  await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Session history" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open report" })).toHaveCount(1);
 });
 
 test("microphone denied: graceful typed fallback, session still completes", async ({ page }) => {
+  await showReportAsPage(page);
   await completeOnboarding(page);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
   await page.getByRole("button", { name: "Begin" }).click();
@@ -103,7 +108,9 @@ test("microphone denied: graceful typed fallback, session still completes", asyn
   await page.getByRole("button", { name: "End session" }).click();
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 60_000 });
-  await expect(page.getByText("This was a short session")).toBeVisible();
+  // Nothing was said, so the report says so in one plain sentence, with no warning boxes.
+  await expect(reportPaper(page)).toContainText(/did not hear any answers/i);
+  await expect(page.getByText("This was a short session")).toHaveCount(0);
 });
 
 test("daily 20-minute limit blocks a new session", async ({ page }) => {
@@ -123,27 +130,32 @@ test("daily 20-minute limit blocks a new session", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /enough practice for today/i })).toBeVisible();
 });
 
-test("typed session saves, then privacy controls delete it", async ({ page }) => {
+test("typed session saves, the report is a PDF with a download button, and privacy controls delete it", async ({ page }) => {
+  await showReportAsPage(page);
   await completeOnboarding(page);
   await completeTypedSession(page);
-  await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
 
-  // The short report comes first: what went well, what to fix, one example and one task to practise.
-  const quick = page.getByTestId("quick-report");
-  await expect(quick.getByRole("heading", { name: "What went well" })).toBeVisible();
-  await expect(quick.getByRole("heading", { name: "What to fix" })).toBeVisible();
-  await expect(quick.getByRole("heading", { name: "Practise today" })).toBeVisible();
-  expect((await quick.innerText()).split(/s+/).length).toBeLessThan(220); // short: well under a page
+  // The report: what went well, what to fix, one example, the face and body, and a link to the next module.
+  const paper = reportPaper(page);
+  await expect(paper.getByRole("heading", { name: "What to fix" })).toBeVisible();
+  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
+  await expect(paper.getByRole("heading", { name: "Practise next" })).toBeVisible();
+  expect((await paper.innerText()).split(/\s+/).length).toBeLessThan(260); // short: about one page
+  // Black and white only: nothing on the report is coloured.
+  const colours = await paper.evaluate((el) => {
+    const out = new Set<string>();
+    for (const node of [el, ...Array.from(el.querySelectorAll("*"))]) {
+      const cs = getComputedStyle(node);
+      for (const c of [cs.color, cs.backgroundColor, cs.borderTopColor]) {
+        const m = c.match(/rgba?\((\d+), (\d+), (\d+)/);
+        if (m && !(m[1] === m[2] && m[2] === m[3])) out.add(c);
+      }
+    }
+    return [...out];
+  });
+  expect(colours).toEqual([]);
 
-  // The long sections are still there, folded under "See the full report".
-  await openFullReport(page);
-  await expect(page.getByRole("heading", { name: /1\. How you did while reading/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Good to know" }).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Instead of this, say it like this" })).toBeVisible();
-  await expect(page.getByText("Instead of saying:").first()).toBeVisible();
-  await expect(page.getByText("Say it like this:").first()).toBeVisible();
-
-  // Download the report as a real PDF and as a text file (both are made on the device).
+  // The only other thing on the page is the button that downloads the real PDF (made on the device).
   const [pdf] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download PDF" }).click()]);
   expect(pdf.suggestedFilename()).toMatch(/^talkzy-report-\d{4}-\d{2}-\d{2}\.pdf$/);
   const pdfStream = await pdf.createReadStream();
@@ -152,23 +164,12 @@ test("typed session saves, then privacy controls delete it", async ({ page }) =>
   const pdfBytes = Buffer.concat(chunks);
   expect(pdfBytes.subarray(0, 5).toString()).toBe("%PDF-");
   expect(pdfBytes.length).toBeGreaterThan(2000);
+  await expect(page.getByRole("button", { name: "Download as text" })).toHaveCount(0);
 
-  const [txt] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download as text" }).click()]);
-  expect(txt.suggestedFilename()).toMatch(/\.txt$/);
-  const txtStream = await txt.createReadStream();
-  const txtChunks: Buffer[] = [];
-  for await (const c of txtStream) txtChunks.push(c as Buffer);
-  const body = Buffer.concat(txtChunks).toString("utf8");
-  expect(body).toMatch(/MY SPEAKING REPORT/);
-  expect(body).toMatch(/WHAT WENT WELL/);
-  expect(body).toMatch(/PRACTISE TODAY/);
-  expect(body.split("\n").length).toBeLessThan(40); // short enough for one page
-  expect(body).toMatch(/Riya/); // the student's name from onboarding
-
-  // Delete this single session.
-  await page.getByRole("button", { name: "Delete this session" }).click();
+  // Delete this single report from the Progress page.
+  await page.goto("/progress");
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Yes, delete" }).click();
-  await page.waitForURL(/\/progress/);
   await expect(page.getByText("Nothing here yet")).toBeVisible();
 
   // Delete everything returns to onboarding with storage cleared.
@@ -178,6 +179,27 @@ test("typed session saves, then privacy controls delete it", async ({ page }) =>
   await page.waitForURL(/\/onboarding/);
   const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("acc.v1.")));
   expect(keys).toEqual([]);
+});
+
+test("on a browser that can show PDFs, the report is the PDF itself", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "pdfViewerEnabled", { get: () => true, configurable: true });
+  });
+  await completeOnboarding(page);
+  await completeTypedSession(page);
+  const frame = page.getByTestId("report-pdf");
+  await expect(frame).toBeVisible();
+  await expect(frame).toHaveAttribute("src", /^blob:/);
+  await expect(page.getByTestId("report-paper")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+});
+
+test("the privacy text names no outside services and says what the camera is for", async ({ page }) => {
+  await page.goto("/onboarding");
+  const text = await page.locator("body").innerText();
+  expect(text).toMatch(/How your information is used/);
+  expect(text).not.toMatch(/Sarvam|Cartesia|Groq|Anthropic|Google|Microsoft|MediaPipe/i);
+  expect(text).toMatch(/camera/i);
 });
 
 test("transcript saving can be turned off and transcripts deleted", async ({ page }) => {

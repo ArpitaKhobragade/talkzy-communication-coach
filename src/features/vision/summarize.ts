@@ -14,7 +14,25 @@ export interface FrameSample {
   bodyMotion?: number;
   /** Mean absolute change in facial feature activations since the previous frame. */
   faceMotion?: number;
+  /** What the face looked like in this frame, from the face model's expression scores. */
+  look?: FaceLook;
 }
+
+/** What one face looked like in one frame. These describe the face's shape, not a feeling. */
+export interface FaceLook {
+  smile: boolean;
+  /** Eyebrows pulled down, mouth turned down or lips pressed hard: a tense, serious or angry-looking face. */
+  tense: boolean;
+  /** Eyebrows pulled up in the middle or eyes wide open: a worried look. */
+  worried: boolean;
+  /** Eyes closed in this frame (counted over many frames, so blinking a lot shows up). */
+  blink: boolean;
+  /** A wink, puffed cheeks or a tongue out. */
+  odd: boolean;
+}
+
+/** Limits on the face model's 0 to 1 expression scores (documented in docs/ARCHITECTURE.md). */
+export const LOOK_LIMITS = { smile: 0.35, browDown: 0.4, mouthFrown: 0.35, mouthPress: 0.5, browInnerUp: 0.4, eyeWide: 0.4, blink: 0.5, wink: 0.5, cheekPuff: 0.4, tongueOut: 0.3 };
 
 /** Heuristic limits (documented in docs/ARCHITECTURE.md). They describe geometry, not feelings. */
 export const FACING_LIMIT_DEG = 25;
@@ -51,6 +69,20 @@ export function headPoseFromMatrix(data: ArrayLike<number>): { yawDeg: number; p
   return { yawDeg: Math.abs((yaw * 180) / Math.PI), pitchDeg: Math.abs((pitch * 180) / Math.PI) };
 }
 
+/** Turns the face model's named expression scores (0 to 1) into a simple description of the face in one frame. */
+export function faceLookFromScores(scores: Record<string, number>): FaceLook {
+  const g = (name: string) => scores[name] ?? 0;
+  const both = (name: string) => (g(`${name}Left`) + g(`${name}Right`)) / 2;
+  const L = LOOK_LIMITS;
+  return {
+    smile: both("mouthSmile") >= L.smile,
+    tense: both("browDown") >= L.browDown || both("mouthFrown") >= L.mouthFrown || both("mouthPress") >= L.mouthPress,
+    worried: g("browInnerUp") >= L.browInnerUp || both("eyeWide") >= L.eyeWide,
+    blink: both("eyeBlink") >= L.blink,
+    odd: Math.abs(g("eyeBlinkLeft") - g("eyeBlinkRight")) >= L.wink || g("cheekPuff") >= L.cheekPuff || g("tongueOut") >= L.tongueOut,
+  };
+}
+
 export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
   const n = frames.length;
   const faceFrames = frames.filter((f) => f.face);
@@ -75,6 +107,9 @@ export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
   const first = frames[0]?.t ?? 0;
   const last = frames[n - 1]?.t ?? 0;
 
+  const looks = faceFrames.map((f) => f.look).filter((l): l is FaceLook => !!l);
+  const lookPct = (key: keyof FaceLook) => (looks.length >= 10 ? pct(looks.filter((l) => l[key]).length, looks.length) : null);
+
   return {
     framesAnalyzed: n,
     durationSec: round((last - first) / 1000),
@@ -90,5 +125,10 @@ export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
     movementLevel: level(bodyMotion, BODY_MOTION_LEVELS),
     facialMovementIndex: faceMotion === null ? null : round(faceMotion, 3),
     facialMovementLevel: level(faceMotion, FACE_MOTION_LEVELS),
+    smilePct: lookPct("smile"),
+    tensePct: lookPct("tense"),
+    worriedPct: lookPct("worried"),
+    blinkPct: lookPct("blink"),
+    oddFacePct: lookPct("odd"),
   };
 }

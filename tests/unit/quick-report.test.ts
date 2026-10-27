@@ -27,6 +27,16 @@ function base(): Session {
   });
 }
 
+/** A session whose camera was on and analysed (the numbers are not used here, only that analysis happened). */
+function withCamera(s: Session): Session {
+  s.cameraOn = true;
+  s.vision = {
+    framesAnalyzed: 100, durationSec: 25, facePresentPct: 90, cameraFacingPct: 80, avgHeadYawDeg: 5, avgHeadPitchDeg: 5, shoulderTiltDeg: 2,
+    uprightPct: 80, bodyVisiblePct: 90, handsVisiblePct: 30, movementIndex: 0.03, movementLevel: "moderate", facialMovementIndex: 0.02, facialMovementLevel: "moderate",
+  };
+  return s;
+}
+
 const good = (observation: string): CoachingItem => ({ kind: "good", topic: "t", observation });
 const improve = (observation: string, howTo?: string): CoachingItem => ({ kind: "improve", topic: "t", observation, howTo });
 
@@ -66,24 +76,57 @@ describe("buildQuickReport", () => {
     expect(q.fix.map((x) => x.area)).toEqual(["Answering", "Reading"]);
   });
 
-  it("uses the AI's headline, a fix with its how-to, and the first exercise", () => {
+  it("uses the AI's headline and a fix with its how-to", () => {
     const s = base();
     s.report.ai = ai();
     const q = buildQuickReport(s);
     expect(q.headline).toBe("You explained your ideas clearly today.");
     expect(q.fix[0]).toMatchObject({ problem: "Answers are short", how: "Add one more sentence with an example." });
-    expect(q.practice).toEqual({ title: "Say it in 3 parts", minutes: 5, instructions: "Point, reason, example." });
   });
 
-  it("shows camera tips when there is no reading or answer tip to show", () => {
-    const s = base();
+  it("keeps the camera in its own section, with its good points and fixes", () => {
+    const s = withCamera(base());
     s.report.ai = null;
     s.report.answerCoaching = [];
     s.report.readingCoaching = [];
     s.report.bodyLanguageCoaching = [good("Your face stayed in view."), improve("You looked away a lot.", "Look at the lens.")];
     const q = buildQuickReport(s);
-    expect(q.good).toEqual([{ area: "Camera", text: "Your face stayed in view." }]);
-    expect(q.fix).toEqual([{ area: "Camera", problem: "You looked away a lot.", how: "Look at the lens." }]);
+    expect(q.good).toEqual([]);
+    expect(q.fix).toEqual([]);
+    expect(q.camera).toEqual({ status: "ok", looked: null, good: ["Your face stayed in view."], fix: [{ problem: "You looked away a lot.", how: "Look at the lens." }] });
+  });
+
+  it("puts how the student looked first: a problem leads the fixes, a good look is its own sentence", () => {
+    const s = withCamera(base());
+    s.report.bodyLanguageCoaching = [
+      { kind: "improve", topic: "You looked nervous", observation: "You looked a little nervous: you blinked a lot.", howTo: "Breathe in slowly." },
+      good("Your face stayed in view."),
+      improve("You looked away a lot.", "Look at the lens."),
+    ];
+    const nervous = buildQuickReport(s).camera;
+    expect(nervous.looked).toBeNull();
+    expect(nervous.fix.map((f) => f.problem)).toEqual(["You looked a little nervous: you blinked a lot.", "You looked away a lot."]);
+
+    s.report.bodyLanguageCoaching = [{ kind: "good", topic: "How you looked", observation: "You looked relaxed and friendly." }, good("Your face stayed in view.")];
+    const relaxed = buildQuickReport(s).camera;
+    expect(relaxed.looked).toBe("You looked relaxed and friendly.");
+    expect(relaxed.good).toEqual(["Your face stayed in view."]);
+  });
+
+  it("says whether the camera was off or could not be used", () => {
+    expect(buildQuickReport(base()).camera.status).toBe("off");
+    const s = base();
+    s.cameraOn = true;
+    expect(buildQuickReport(s).camera.status).toBe("unavailable");
+  });
+
+  it("says so when no answers were captured", () => {
+    const s = base();
+    expect(buildQuickReport(s).noAnswers).toBe(false);
+    s.speech = { ...s.speech, totalWords: 0 };
+    const q = buildQuickReport(s);
+    expect(q.noAnswers).toBe(true);
+    expect(q.headline).toMatch(/did not hear any answers/i);
   });
 
   it("works from the rule-based coaching when there is no AI feedback", () => {

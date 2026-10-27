@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding, openFullReport } from "./helpers";
+import { completeOnboarding, reportPaper, showReportAsPage } from "./helpers";
 
 // Chromium's built-in fake camera (a moving test pattern, no person) lets us check that the
 // on-device MediaPipe pipeline really loads its WASM + models and runs on live video frames
@@ -9,7 +9,7 @@ test.use({
   launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
 });
 
-test("camera analysis loads on-device models, runs, and reports observations without claiming emotion", async ({ page }) => {
+test("camera analysis loads on-device models, runs, and puts the camera feedback in the report, and does not guess a look when no face is seen", async ({ page }) => {
   const requests: string[] = [];
   page.on("request", (r) => requests.push(r.url()));
   const externalResponses: string[] = [];
@@ -20,6 +20,7 @@ test("camera analysis loads on-device models, runs, and reports observations wit
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
+  await showReportAsPage(page);
   await completeOnboarding(page);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
 
@@ -40,17 +41,13 @@ test("camera analysis loads on-device models, runs, and reports observations wit
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 60_000 });
 
-  await openFullReport(page);
-  const body = page.getByRole("heading", { name: /3\. Camera/ }).locator("xpath=ancestor::section");
-  await expect(body).toContainText(/What to fix/);
-  await expect(body).toContainText(/How to fix it/);
-  // Face and body topics are named in plain words, including the face while talking.
-  await expect(body).toContainText(/Your face in the picture/);
-  await expect(body).toContainText(/say nothing about how you feel/i);
-  // The test pattern contains no person, so no face should be reported.
-  await expect(body).toContainText(/out of view for 100% of the time/);
-  await expect(body).toContainText(/What to fix/);
-  await expect(body).toContainText(/How to fix it: Sit so your whole face stays in the picture/);
+  const paper = reportPaper(page);
+  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
+  // The test pattern contains no person, so the report says the face was out of the picture, and how to fix it.
+  await expect(paper).toContainText(/Your face was often out of the picture/);
+  await expect(paper).toContainText(/How to fix it: Sit so your whole face stays in the picture/);
+  // With no face to read, it does not guess how the person looked.
+  await expect(paper).not.toContainText(/nervous|angry|tense|relaxed/i);
 
   expect(pageErrors).toEqual([]);
   // Nothing left the device: no external request got a response. (MediaPipe's runtime tries to

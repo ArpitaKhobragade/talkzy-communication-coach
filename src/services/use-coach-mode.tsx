@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Notice } from "@/components/ui";
 
 export type CoachMode = "live" | "dev" | "unknown";
 
@@ -53,15 +52,4 @@ export function useServerStatus(): ServerStatus {
 /** Is a real AI configured on the server? */
 export function useCoachMode(): CoachMode {
   return useServerStatus().mode;
-}
-
-export function DevModeBanner({ mode }: { mode: CoachMode }) {
-  if (mode !== "dev") return null;
-  return (
-    <Notice tone="warn" title="Development mode: no AI key configured" role="status">
-      The coach uses a scripted list of questions and does not understand your answers. Your speech measurements (pace, pauses, filler
-      words) are still real, but AI-written feedback on grammar, vocabulary and structure is switched off. See the README to add an API
-      key.
-    </Notice>
-  );
 }

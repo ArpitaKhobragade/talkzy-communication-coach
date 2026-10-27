@@ -125,6 +125,12 @@ export const VisionMetricsSchema = z.object({
   movementLevel: z.enum(["low", "moderate", "high"]).nullable(),
   facialMovementIndex: z.number().nullable(),
   facialMovementLevel: z.enum(["low", "moderate", "high"]).nullable(),
+  /** How much of the time the face looked a certain way. Optional so sessions saved before this was added still load. */
+  smilePct: z.number().min(0).max(100).nullable().optional(),
+  tensePct: z.number().min(0).max(100).nullable().optional(),
+  worriedPct: z.number().min(0).max(100).nullable().optional(),
+  blinkPct: z.number().min(0).max(100).nullable().optional(),
+  oddFacePct: z.number().min(0).max(100).nullable().optional(),
 });
 export type VisionMetrics = z.infer<typeof VisionMetricsSchema>;
 
@@ -239,6 +245,8 @@ export const SessionSchema = z.object({
   transcriptKept: z.boolean(),
   speech: SpeechMetricsSchema,
   vision: VisionMetricsSchema.nullable(),
+  /** The camera was switched on for this session (even if its analysis could not run). */
+  cameraOn: z.boolean().optional(),
   report: ReportSchema,
 });
 export type Session = z.infer<typeof SessionSchema>;

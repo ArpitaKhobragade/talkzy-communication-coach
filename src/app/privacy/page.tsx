@@ -13,11 +13,11 @@ export default function PrivacyPage() {
         <p className="text-muted">
           Students under 13 need a parent or guardian to agree before using the app. The camera is always optional and starts switched off.
           The coach never asks for personal details, and if a student says they are unsafe or very upset, it suggests talking to a trusted
-          adult. Schools using this app should add their own consent process and review the AI and speech services used.
+          adult. Schools using this app should add their own consent process and review how the app is set up.
         </p>
         <h2 className="pt-2 text-lg font-bold">Your controls</h2>
         <p className="text-muted">
-          In Settings you can turn transcript saving off, delete a single session, export your data, or delete everything this app has stored.
+          In Settings you can turn transcript saving off, export your data, or delete everything this app has stored. On the Progress page you can delete a single report.
         </p>
       </Card>
     </div>

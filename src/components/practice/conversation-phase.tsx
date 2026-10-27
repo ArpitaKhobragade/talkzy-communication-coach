@@ -538,11 +538,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         </div>
       </div>
 
-      {coachMode === "dev" && (
-        <Notice tone="warn" role="status">
-          Development mode: the coach asks scripted questions and does not understand your answers. Add an API key for the real AI coach.
-        </Notice>
-      )}
       {notice && (
         <Notice tone="warn" role="alert">
           {notice}

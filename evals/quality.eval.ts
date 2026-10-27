@@ -196,7 +196,6 @@ async function evalReportRun(b: BuiltScenario, run: number): Promise<ReportRun> 
     ...quick.good.map((g) => `${g.area}: ${g.text}`),
     ...quick.fix.map((f) => `${f.area}: ${f.problem}${f.how ? ` Try this: ${f.how}` : ""}`),
     quick.sayItBetter ? `Say it like this: ${quick.sayItBetter.better}` : "",
-    quick.practice ? `${quick.practice.title}. ${quick.practice.instructions}` : "",
   ]
     .filter(Boolean)
     .join("\n");

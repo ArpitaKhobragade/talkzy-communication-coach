@@ -29,6 +29,8 @@ export interface FinalizeInput {
   reading: ReadingResult;
   turns: Turn[];
   vision: VisionMetrics | null;
+  /** The camera was switched on, even if its analysis could not run. */
+  cameraOn?: boolean;
   keepTranscript: boolean;
   ai: AiFeedback | null;
   aiReason?: string;
@@ -63,6 +65,7 @@ export function buildSession(i: FinalizeInput): Session {
     transcriptKept: i.keepTranscript,
     speech,
     vision: i.vision,
+    cameraOn: i.cameraOn ?? i.vision !== null,
     report: {
       generatedBy: i.ai ? "ai" : "dev",
       model: i.model,

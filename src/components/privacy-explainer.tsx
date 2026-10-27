@@ -1,6 +1,6 @@
 import { Card } from "./ui";
 
-/** Plain-language explanation of how data is processed. Shown in onboarding, settings and /privacy. */
+/** Plain-language explanation of how data is used. Shown in onboarding, settings and /privacy. */
 export function PrivacyExplainer() {
   return (
     <Card className="space-y-4 text-[0.95rem] leading-relaxed">
@@ -9,42 +9,29 @@ export function PrivacyExplainer() {
         <div>
           <dt className="font-semibold">Your voice (microphone)</dt>
           <dd className="text-muted">
-            The coach listens only during practice. Your device finds when you are speaking, and short clips of your speech are sent securely to a
-            speech-to-text service (Sarvam AI) through this app&apos;s server, which turns them into text. To show your words on screen while you are
-            still speaking, your browser also listens and, in Chrome and Edge, may send audio to the browser company&apos;s speech service (for example
-            Google or Microsoft). If the Sarvam service is not set up, your browser does all of it. We do not record or save your audio, and the server
-            forwards each clip and forgets it. You can always type your answers instead.
-          </dd>
-        </div>
-        <div>
-          <dt className="font-semibold">The coach&apos;s voice</dt>
-          <dd className="text-muted">
-            The coach&apos;s words are sent to a text-to-speech service (Cartesia) to create the spoken audio, or spoken by your browser if that is not set
-            up. Only the coach&apos;s own sentences are sent, not your answers.
+            The coach listens only while you practise. Your voice is turned into text so the coach can answer you and your report can be written. We
+            do not record or save your voice. You can type your answers instead.
           </dd>
         </div>
         <div>
           <dt className="font-semibold">Your camera (optional)</dt>
           <dd className="text-muted">
-            If you turn it on, video is analysed inside your browser on your device. It is never recorded, saved or uploaded, and this app
-            blocks the analysis software from contacting any outside server. Only simple numbers are kept (for example, how often your face
-            was visible). The camera cannot tell how you feel, and we do not claim it can.
+            If you turn it on, the camera is used only to see your face and body, so your report can tell you how you looked (for example nervous,
+            tense or relaxed) and how to improve. The video stays on your device. It is never recorded, saved or sent anywhere.
           </dd>
         </div>
         <div>
           <dt className="font-semibold">What you say (text)</dt>
           <dd className="text-muted">
-            The text of your answers is sent securely to our server and to an AI service (Groq or Anthropic, depending on how the app is set up) so
-            the coach can reply and write your feedback. Please do not share personal details such as your full name, school, address or phone
-            number.
+            The text of your answers is used to write your feedback. Please do not share personal details such as your full name, school, address or
+            phone number.
           </dd>
         </div>
         <div>
           <dt className="font-semibold">What is saved, and where</dt>
           <dd className="text-muted">
-            Your profile, settings, session reports and (if you allow it) transcripts are saved only on this device, in this browser. There are
-            no accounts or passwords. You can turn transcript saving off, delete any session, export your data, or delete everything at any
-            time in Settings.
+            Your profile, settings and reports are saved only on this device, in this browser. There are no accounts or passwords. You can turn
+            transcript saving off, delete any session, or delete everything at any time in Settings.
           </dd>
         </div>
       </dl>

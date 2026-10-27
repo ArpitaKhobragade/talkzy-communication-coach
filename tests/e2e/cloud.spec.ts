@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { getModule } from "../../src/features/content/modules";
-import { completeOnboarding, openFullReport } from "./helpers";
+import { completeOnboarding, reportPaper, showReportAsPage } from "./helpers";
 
 // Cloud mode: Silero VAD (real, in the browser) + Sarvam speech-to-text + Cartesia voice + Groq LLM.
 // The three services are local mocks (tests/e2e/mock-services.mjs), and the "microphone" plays a
@@ -15,7 +15,9 @@ test.beforeEach(async ({ request }) => {
 
 async function startPractice(page: import("@playwright/test").Page) {
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
-  await expect(page.getByText(/Sarvam AI/).first()).toBeVisible(); // honest data-flow wording for cloud speech
+  // The page has finished checking the services, and it names no outside service to the student.
+  await expect(page.getByRole("button", { name: "Begin" })).toBeEnabled();
+  await expect(page.getByText(/Sarvam|Cartesia|Groq/i)).toHaveCount(0);
 }
 
 test("status reports cloud services without exposing keys", async ({ request }) => {
@@ -27,8 +29,9 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   const browserRequests: string[] = [];
   page.on("request", (r) => browserRequests.push(r.url()));
 
+  await showReportAsPage(page);
   await completeOnboarding(page);
-  await expect(page.getByText(/Development mode: no AI key configured/)).toHaveCount(0);
+  await expect(page.getByText(/Development mode/)).toHaveCount(0);
   await startPractice(page);
   await page.getByRole("button", { name: "Begin" }).click();
 
@@ -53,16 +56,16 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 90_000 });
 
-  // AI-written report: reading + answers + camera sections, quotes verified against the transcript.
-  await openFullReport(page);
-  await expect(page.getByText("AI-written feedback").first()).toBeVisible();
-  await expect(page.getByText("You explained your ideas clearly today.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /1\. How you did while reading/ })).toBeVisible();
-  await expect(page.getByText("You read the passage steadily.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /2\. How you did while answering/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /3\. Camera/ })).toBeVisible();
-  await expect(page.getByText(/camera was off/i)).toBeVisible();
-  await expect(page.getByText("A brand is the promise a company").first()).toBeVisible(); // real quote kept
+  // The report is the PDF (drawn as a page here): the AI's headline, what went well, what to fix and the camera line.
+  const paper = reportPaper(page);
+  await expect(paper).toBeVisible();
+  await expect(paper.getByText("You explained your ideas clearly today.")).toBeVisible();
+  await expect(paper.getByText("You started with your idea.")).toBeVisible();
+  await expect(paper.getByText("Add examples")).toBeVisible();
+  await expect(paper.getByText("Add one real-life example to each answer.")).toBeVisible();
+  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
+  await expect(paper).toContainText(/camera was off/i);
+  await expect(page.getByText(/AI-written|Development mode/)).toHaveCount(0);
   const html = await page.content();
   expect(html).not.toContain("this sentence was never spoken by the student"); // fabricated quote dropped
   expect(html).not.toContain("an invented grammar mistake");
@@ -70,6 +73,7 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   // Measurements came from VAD segments (real speech timing), not from typed answers.
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
   expect(stored.mode).toBe("live");
+  expect(stored.report.ai.strengths[0].quote).toContain("A brand is the promise a company"); // the real quote was kept
   expect(stored.speech.voiceTurns).toBeGreaterThanOrEqual(2);
   expect(stored.speech.speakingSec).toBeGreaterThan(3);
   expect(stored.turns.filter((t: { inputMode?: string }) => t.inputMode === "voice").length).toBeGreaterThanOrEqual(2);

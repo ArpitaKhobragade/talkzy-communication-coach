@@ -87,13 +87,17 @@ export async function mockSpeech(page: Page, answers: string[]) {
   }, answers);
 }
 
-/** The short report is shown first; the long sections are folded under "See the full report". */
-export async function openFullReport(page: Page) {
-  await expect(page.getByTestId("quick-report")).toBeVisible();
-  await page.getByTestId("full-report").evaluate((el) => {
-    (el as HTMLDetailsElement).open = true;
+/**
+ * The report is a PDF shown in the page. Test browsers have no PDF viewer, so the report is drawn as a page
+ * instead (the same words). Call this before opening the site, then read the page with `reportPaper`.
+ */
+export async function showReportAsPage(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "pdfViewerEnabled", { get: () => false, configurable: true });
   });
 }
+
+export const reportPaper = (page: Page) => page.getByTestId("report-paper");
 
 export async function completeOnboarding(
   page: Page,
