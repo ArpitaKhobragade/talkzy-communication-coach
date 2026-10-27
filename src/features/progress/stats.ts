@@ -1,5 +1,5 @@
 import type { Goal, Level } from "../content/types";
-import { modulesFor } from "../content/modules";
+import { MODULES } from "../content/modules";
 import type { LearningModule } from "../content/types";
 import type { Profile, Session } from "../session/types";
 
@@ -100,16 +100,13 @@ const avg = (xs: (number | null)[]) => {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 };
 
-/**
- * Recommend the next module. It is always for the subject and goal saved in the profile (they are
- * changed only there). The recent sessions decide the difficulty and the tip that is shown.
- */
+/** Recommend the next module and focus from what the student's recent sessions actually showed. */
 export function recommendNext(profile: Profile, sessions: Session[]): Recommendation {
   const completed = sessions.filter((s) => s.completed); // newest first
   const recent = completed.slice(0, 3);
 
-  const goal: Goal = profile.goal;
-  let reason = "A good place to start, based on the subject, level and goal you chose.";
+  let goal: Goal = profile.goal;
+  let reason = "A good place to start, based on the field, level and goal you chose.";
   let level: Level = profile.level;
 
   if (recent.length > 0) {
@@ -119,13 +116,17 @@ export function recommendNext(profile: Profile, sessions: Session[]): Recommenda
     const variety = avg(recent.map((s) => s.speech.lexicalVariety));
 
     if (filler !== null && filler >= 3) {
-      reason = `Filler words averaged ${filler.toFixed(1)} per 100 words in your last ${recent.length} session${recent.length > 1 ? "s" : ""}. Pause quietly instead of saying "um".`;
+      goal = "fluency";
+      reason = `Filler words averaged ${filler.toFixed(1)} per 100 words in your last ${recent.length} session${recent.length > 1 ? "s" : ""}. Let's practise smoother delivery.`;
     } else if (answerWords !== null && answerWords < 25) {
-      reason = `Your answers averaged ${Math.round(answerWords)} words. Add a reason and an example to each answer.`;
+      goal = "clarity";
+      reason = `Your answers averaged ${Math.round(answerWords)} words. Let's practise explaining with a reason and an example.`;
     } else if (wpm !== null && (wpm > 165 || wpm < 95)) {
-      reason = `Your pace averaged ${Math.round(wpm)} words per minute. Aim for a steady speed.`;
+      goal = "fluency";
+      reason = `Your pace averaged ${Math.round(wpm)} words per minute. Let's practise a steadier speed.`;
     } else if (variety !== null && variety < 0.5) {
-      reason = "You repeated many of the same words recently. Try new words from the passage.";
+      goal = "vocabulary";
+      reason = "You repeated many of the same words recently. Let's practise using richer vocabulary.";
     } else {
       reason = "Your recent sessions look steady. Keep the habit going.";
     }
@@ -144,11 +145,11 @@ export function recommendNext(profile: Profile, sessions: Session[]): Recommenda
     }
   }
 
-  const choices = modulesFor(profile.field, goal);
+  const fieldModules = MODULES.filter((m) => m.field === profile.field);
   const recentIds = new Set(recent.map((s) => s.moduleId));
-  const target = choices.find((m) => m.level === level) ?? choices[0];
+  const target = fieldModules.find((m) => m.level === level) ?? fieldModules[0];
   // Prefer a module not practised recently so the passage is fresh.
-  const candidates = [target, ...choices.filter((m) => m !== target)];
+  const candidates = [target, ...fieldModules.filter((m) => m !== target)];
   const chosen = candidates.find((m) => !recentIds.has(m.id)) ?? target;
   return { module: chosen, goal, reason };
 }

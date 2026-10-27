@@ -107,19 +107,8 @@ export function buildReadingCoaching(reading: ReadingResult, passageWords: numbe
   const a = reading.aloud;
 
   if (a) {
-    if (a.accuracyPct >= 90 && a.missedWords.length >= 3) {
-      // A high percentage can still hide a few skipped words. Say so instead of praising the reading.
-      out.push(
-        item(
-          "improve",
-          "Words to practise",
-          `The app understood ${a.accuracyPct}% of the words you read, but these were not clear: ${a.missedWords.slice(0, 6).join(", ")}.`,
-          "Skipped or changed words can change what the sentence means.",
-          "Say each of these words slowly three times, then read the passage again.",
-        ),
-      );
-    } else if (a.accuracyPct >= 90) {
-      out.push(item("good", "How clear you were", `The app understood ${a.accuracyPct}% of the words you read.`));
+    if (a.accuracyPct >= 90) {
+      out.push(item("good", "How clear you were", `You read clearly. The app understood ${a.accuracyPct}% of the words you read.`));
     } else if (a.accuracyPct >= 75) {
       out.push(
         item(
@@ -273,8 +262,7 @@ export function buildAnswerCoaching(s: SpeechMetrics): CoachingItem[] {
   if (s.lexicalVariety !== null) {
     if (s.lexicalVariety < 0.45) {
       out.push(item("improve", "Using different words", `You used the same words again and again (${Math.round(s.lexicalVariety * 100)} out of 100 were different).`, "Different, exact words make you sound clear and strong.", "Before you answer, pick two key words from the passage and use both."));
-    } else if (s.lexicalVariety >= 0.6 && (s.avgAnswerWords ?? 0) >= 18) {
-      // Short answers always look varied, so variety is only praised when the answers were long enough to show it.
+    } else if (s.lexicalVariety >= 0.6) {
       out.push(item("good", "Using different words", "You used many different words. That makes your speech interesting."));
     }
   }

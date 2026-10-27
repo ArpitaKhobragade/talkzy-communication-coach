@@ -1,10 +1,6 @@
 // Browser-only. Captures ONE spoken answer with Silero VAD + Sarvam speech-to-text.
-// Sarvam is the accurate transcript but it only answers after a pause in speaking, so while the
-// student is talking the words are shown live by the browser's own recogniser (when it has one).
-// The live words are for display only: what is saved and measured always comes from Sarvam.
 // Half-duplex: call begin() only after the coach has finished speaking.
 import type { CaptureResult, TurnCaptureLike, TurnCaptureOptions } from "./capture";
-import { SpeechRecognizer, recognitionSupported } from "./recognition";
 import { encodeWav16, splitForStt, STT_SAMPLE_RATE, timingFromSpans, type SpeechSpan } from "./segments";
 import type { VadSegment, VadSession } from "./vad-session";
 
@@ -41,9 +37,6 @@ export class CloudTurnCapture implements TurnCaptureLike {
   private turnStart = 0;
   private failures = 0;
   private fatalRaised = false;
-  private live: SpeechRecognizer | null = null;
-  private liveFinals: string[] = [];
-  private liveInterim = "";
   active = false;
 
   constructor(
@@ -63,8 +56,6 @@ export class CloudTurnCapture implements TurnCaptureLike {
     this.speaking = false;
     this.failures = 0;
     this.fatalRaised = false;
-    this.liveFinals = [];
-    this.liveInterim = "";
     this.active = true;
     this.turnStart = performance.now();
     this.lastActivity = this.turnStart;
@@ -73,7 +64,6 @@ export class CloudTurnCapture implements TurnCaptureLike {
       onSpeechStart: () => {
         this.speaking = true;
         this.lastActivity = performance.now();
-        this.emitInterim();
       },
       onSegment: (seg) => this.handleSegment(seg),
       onLevel: (p) => this.opts.onLevel?.(p),
@@ -82,54 +72,11 @@ export class CloudTurnCapture implements TurnCaptureLike {
       this.active = false;
       this.opts.onFatal("vad");
     });
-    this.startLive();
-  }
-
-  /** Live words while the student is still speaking. Any problem here is ignored: it only affects the display. */
-  private startLive() {
-    this.live?.abort();
-    this.live = null;
-    if (!recognitionSupported()) return;
-    const rec = new SpeechRecognizer(this.opts.lang, {
-      onInterim: (text) => {
-        this.liveInterim = text;
-        this.emitInterim();
-      },
-      onFinal: (text) => {
-        if (text) this.liveFinals.push(text);
-        this.liveInterim = "";
-        this.emitInterim();
-      },
-      onFatal: () => {
-        // The browser's recogniser is unavailable or blocked. Cloud transcription carries on without live words.
-        if (this.live === rec) this.live = null;
-      },
-    });
-    this.live = rec;
-    rec.start();
-  }
-
-  /** Everything the browser's recogniser has heard in this answer so far. */
-  private liveText(): string {
-    return [...this.liveFinals, this.liveInterim].filter(Boolean).join(" ").trim();
-  }
-
-  /**
-   * What the student sees. While they are speaking, or while a part is still being transcribed, it is
-   * the live words. Once the transcript is ready it is Sarvam's text.
-   */
-  private displayText(): string {
-    const confirmed = this.currentText();
-    const live = this.liveText();
-    const talking = this.speaking || this.pending > 0;
-    if (talking && live) return live;
-    if (talking) return `${confirmed} ...`.trim(); // heard, not transcribed yet
-    return confirmed || live;
   }
 
   private emitInterim() {
-    if (!this.active) return;
-    this.opts.onInterim(this.displayText());
+    const text = this.currentText();
+    this.opts.onInterim(this.pending > 0 ? `${text} ...`.trim() : text);
   }
 
   private handleSegment(seg: VadSegment) {
@@ -173,9 +120,7 @@ export class CloudTurnCapture implements TurnCaptureLike {
   }
 
   hasText(): boolean {
-    if (this.currentText().length > 0) return true;
-    // Cloud transcription failed for this answer, but the browser heard it.
-    return this.failures > 0 && this.liveText().length > 0;
+    return this.currentText().length > 0;
   }
 
   idleMs(): number {
@@ -198,18 +143,11 @@ export class CloudTurnCapture implements TurnCaptureLike {
     const deadline = performance.now() + END_WAIT_MS;
     while (this.pending > 0 && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     this.active = false;
-    this.stopLive();
-    return { text: this.currentText() || (this.failures > 0 ? this.liveText() : ""), confidence: null, timing: timingFromSpans(this.spans, this.turnStart) };
-  }
-
-  private stopLive() {
-    this.live?.abort();
-    this.live = null;
+    return { text: this.currentText(), confidence: null, timing: timingFromSpans(this.spans, this.turnStart) };
   }
 
   dispose(): void {
     this.active = false;
-    this.stopLive();
     this.vad.setListener(null);
     void this.vad.pause().catch(() => undefined);
   }

@@ -1,5 +1,4 @@
-import type { Session } from "../session/types";
-import { buildQuickReport } from "./quick";
+import type { CoachingItem, Session } from "../session/types";
 
 /*
  * Turns a saved session into a simple document (a list of blocks). The same blocks are used to
@@ -17,7 +16,7 @@ export type DocBlock =
   | { t: "p"; text: string }
   | { t: "note"; text: string }
   | { t: "bullet"; text: string; topic?: string; why?: string; how?: string }
-  | { t: "compare"; said: string; better: string; why?: string };
+  | { t: "compare"; said: string; better: string; why: string };
 
 export interface ReportContext {
   displayName: string;
@@ -28,10 +27,32 @@ export interface ReportContext {
   next?: { title: string; level: string; reason: string };
 }
 
+function group(items: CoachingItem[]) {
+  return {
+    good: items.filter((i) => i.kind === "good"),
+    fix: items.filter((i) => i.kind === "improve"),
+    note: items.filter((i) => i.kind === "info"),
+  };
+}
+
+function bullet(i: CoachingItem): DocBlock {
+  return { t: "bullet", topic: i.topic, text: i.observation, why: i.why, how: i.howTo };
+}
+
+/** Adds "What went well / What to fix / Good to know" blocks for a list of coaching items. */
+function coachingBlocks(items: CoachingItem[]): DocBlock[] {
+  const g = group(items);
+  const out: DocBlock[] = [];
+  // Short on purpose: the best points only. The full detail is on the report page.
+  if (g.good.length) out.push({ t: "h3", text: "What went well", tone: "good" }, ...g.good.slice(0, 1).map(bullet));
+  if (g.fix.length) out.push({ t: "h3", text: "What to fix", tone: "fix" }, ...g.fix.slice(0, 2).map(bullet));
+  if (g.note.length && g.good.length + g.fix.length < 2) out.push({ t: "h3", text: "Good to know", tone: "note" }, ...g.note.slice(0, 1).map(bullet));
+  return out;
+}
+
 export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] {
   const r = s.report;
   const ai = r.ai;
-  const q = buildQuickReport(s);
   const when = new Date(s.startedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
   const minutes = Math.max(1, Math.round(s.durationSec / 60));
   const blocks: DocBlock[] = [];
@@ -40,30 +61,62 @@ export function buildReportDocument(s: Session, ctx: ReportContext): DocBlock[] 
   blocks.push({ t: "meta", text: `${ctx.displayName}  |  ${when}  |  ${minutes} min` });
   blocks.push({ t: "meta", text: `${ctx.moduleTitle}  |  ${ctx.fieldName}  |  ${s.level}  |  Goal: ${ctx.goalName}` });
 
-  if (ai) blocks.push({ t: "p", text: q.headline });
+  if (ai) blocks.push({ t: "p", text: ai.headline });
   else blocks.push({ t: "note", text: `${r.aiUnavailableReason ?? "The written feedback could not be made this time."} The tips below still come from what you really said and did.` });
 
-  if (q.good.length) {
-    blocks.push({ t: "h2", text: "What went well" });
-    blocks.push(...q.good.map((g): DocBlock => ({ t: "bullet", topic: g.area, text: g.text })));
+  // 1. Reading
+  blocks.push({ t: "h2", text: "1. How you did while reading" });
+  if (ai?.reading) {
+    blocks.push({ t: "p", text: ai.reading.summary });
+    if (ai.reading.wentWell.length) blocks.push({ t: "h3", text: "What went well", tone: "good" }, ...ai.reading.wentWell.slice(0, 1).map((text): DocBlock => ({ t: "bullet", text })));
+    if (ai.reading.improve.length) blocks.push({ t: "h3", text: "What to fix", tone: "fix" }, ...ai.reading.improve.slice(0, 2).map((x): DocBlock => ({ t: "bullet", text: x.issue, how: x.howTo })));
+  } else if (r.readingCoaching?.length) {
+    blocks.push(...coachingBlocks(r.readingCoaching));
+  } else {
+    blocks.push({ t: "p", text: "No reading information was saved for this session." });
   }
-  if (q.fix.length) {
-    blocks.push({ t: "h2", text: "What to fix" });
-    blocks.push(...q.fix.map((x): DocBlock => ({ t: "bullet", topic: x.area, text: x.quote ? `${x.problem} You said: "${x.quote}"` : x.problem, how: x.how })));
+
+  // 2. Answering
+  blocks.push({ t: "h2", text: "2. How you did while answering" });
+  if (r.answerCoaching?.length) blocks.push(...coachingBlocks(r.answerCoaching));
+  else blocks.push(...r.speechNotes.map((text): DocBlock => ({ t: "bullet", text })));
+
+  if (r.sayItBetter?.length) {
+    blocks.push({ t: "h3", text: "Instead of this, say it like this", tone: "good" });
+    blocks.push(...r.sayItBetter.slice(0, 2).map((x): DocBlock => ({ t: "compare", said: x.said, better: x.better, why: x.why })));
   }
-  if (q.sayItBetter) {
-    blocks.push({ t: "h2", text: "Instead of this, say it like this" });
-    blocks.push({ t: "compare", said: q.sayItBetter.said, better: q.sayItBetter.better });
+  if (ai) {
+    blocks.push({ t: "h3", text: "What the AI coach noticed", tone: "note" });
+    for (const x of ai.strengths.slice(0, 1)) blocks.push({ t: "bullet", text: `Went well: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}` });
+    for (const x of ai.improvements.slice(0, 2)) blocks.push({ t: "bullet", text: `To fix: ${x.title}. ${x.detail}${x.quote ? ` You said: "${x.quote}"` : ""}`, how: x.tip });
+    for (const g of ai.grammar.slice(0, 2)) blocks.push({ t: "compare", said: g.quote, better: g.suggestion, why: g.issue });
+    for (const u of ai.vocabulary.upgrades.slice(0, 2)) blocks.push({ t: "bullet", text: `Instead of "${u.said}", try "${u.tryInstead}".` });
   }
-  if (q.practice) {
-    blocks.push({ t: "h2", text: "Practise today" });
-    blocks.push({ t: "bullet", text: `${q.practice.title} (about ${q.practice.minutes} min): ${q.practice.instructions}` });
+
+  // 3. Camera
+  blocks.push({ t: "h2", text: "3. Camera: your face and body" });
+  if (r.bodyLanguageCoaching?.length) {
+    blocks.push(...coachingBlocks(r.bodyLanguageCoaching));
+    blocks.push({ t: "note", text: "The camera can only see where your face and body are. This says nothing about how you feel, how sure you are, or whether you are telling the truth." });
+  } else if (r.bodyLanguageNotes.length) {
+    blocks.push(...r.bodyLanguageNotes.map((text): DocBlock => ({ t: "bullet", text })));
+  } else {
+    blocks.push({ t: "p", text: "The camera was off, so there are no face or body tips this time. Turn it on at the start of your next session to get them." });
   }
+
+  // Practice
+  blocks.push({ t: "h2", text: "Practise before your next session" });
+  const exercises = ai ? ai.exercises : r.fallbackExercises;
+  for (const e of exercises.slice(0, 2)) blocks.push({ t: "bullet", text: `${e.title} (about ${e.minutes} min): ${e.instructions}` });
+  if (ai?.nextSessionFocus) blocks.push({ t: "p", text: `Next time, focus on this: ${ai.nextSessionFocus}` });
   if (ctx.next) blocks.push({ t: "p", text: `Next session we suggest: ${ctx.next.title} (${ctx.next.level}). ${ctx.next.reason}` });
 
-  if ([...q.good, ...q.fix].some((x) => x.area === "Camera")) {
-    blocks.push({ t: "note", text: "The camera can only see where your face and body are. This says nothing about how you feel, how sure you are, or whether you are telling the truth." });
+  // Numbers (the three that matter most)
+  if (r.speechNotes.length) {
+    blocks.push({ t: "h2", text: "Your numbers" });
+    blocks.push(...r.speechNotes.slice(0, 3).map((text): DocBlock => ({ t: "bullet", text })));
   }
+
   blocks.push({ t: "note", text: "This report is a guide to help you practise. It is not an exam mark." });
   return blocks;
 }
@@ -97,8 +150,7 @@ export function documentToText(blocks: DocBlock[]): string {
         if (b.how) lines.push(`    How to fix it: ${b.how}`);
         break;
       case "compare":
-        lines.push(`- Instead of: "${b.said}"`, `    Say it like this: "${b.better}"`);
-        if (b.why) lines.push(`    Why: ${b.why}`);
+        lines.push(`- Instead of: "${b.said}"`, `    Say it like this: "${b.better}"`, `    Why: ${b.why}`);
         break;
     }
   }
@@ -225,15 +277,14 @@ export async function renderPdf(blocks: DocBlock[]): Promise<ArrayBuffer> {
           lineH(9) * 2 +
             heightOf(`"${b.said}"`, 10.5, "italic", cw) +
             heightOf(`"${b.better}"`, 10.5, "bold", cw) +
-            (b.why ? heightOf(b.why, 9.5, "normal", cw) : 0) +
+            heightOf(b.why, 9.5, "normal", cw) +
             3,
         );
         text("Instead of saying:", { size: 9, style: "bold", color: FIX, x: M + 5, width: bodyW - 5 });
         text(`"${b.said}"`, { size: 10.5, style: "italic", color: MUTED, x: M + 5, width: bodyW - 5, gap: 0.5 });
         text("Say it like this:", { size: 9, style: "bold", color: GOOD, x: M + 5, width: bodyW - 5 });
         text(`"${b.better}"`, { size: 10.5, style: "bold", x: M + 5, width: bodyW - 5 });
-        if (b.why) text(b.why, { size: 9.5, color: MUTED, x: M + 5, width: bodyW - 5, gap: 2.5 });
-        else y += 2.5;
+        text(b.why, { size: 9.5, color: MUTED, x: M + 5, width: bodyW - 5, gap: 2.5 });
         break;
       }
     }

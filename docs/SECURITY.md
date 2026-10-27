@@ -21,7 +21,7 @@
 - Transcripts can be switched off after report generation (`keepTranscripts`), and any session or all data can be deleted in Settings. Data export is available.
 
 ## What leaves the device (disclosed in the app on /privacy and during onboarding)
-1. **Audio -> speech recognition.** Chrome/Edge's built-in Web Speech API may send microphone audio to the browser vendor's speech service to produce text. It is used for the live words shown while the student speaks, and as the fallback when Sarvam is not set up. Students are told this before the first use; typed answers are always available.
+1. **Audio -> speech recognition.** Chrome/Edge's built-in Web Speech API may send microphone audio to the browser vendor's speech service to produce text. Students are told this before the first use; typed answers are always available.
 2. **Transcript text -> our server -> Anthropic API** to generate the coach's replies and the report.
 3. **Video:** never leaves the device.
 

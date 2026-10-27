@@ -21,24 +21,19 @@ export interface FieldInfo {
 }
 
 export interface LearningModule {
-  /** `${field}-${level}-${goal}` */
+  /** `${field}-${level}` */
   id: string;
   field: FieldId;
   level: Level;
-  /** What the student wants to improve. Each goal has its own passage, questions and activity. */
-  goal: Goal;
   title: string;
   /** One sentence shown on the library card. */
   summary: string;
   /** Paragraphs separated by a blank line. English only. */
   passage: string;
-  /** 5-6 useful terms that appear in the passage, shown as a vocabulary strip. */
+  /** 4-6 useful terms from the passage, shown as a vocabulary strip. */
   keyTerms: string[];
-  /** First question the coach asks after the reading. The easiest one. */
+  /** First question the coach asks after the reading. */
   openingQuestion: string;
-  /**
-   * Exactly 6 follow-up questions ordered from easy to difficult: two easy, two medium, two hard.
-   * Used by the development-mode coach and as the question ladder for the AI coach.
-   */
+  /** 4-6 follow-up questions used by the development-mode coach and as hints. */
   followUpQuestions: string[];
 }

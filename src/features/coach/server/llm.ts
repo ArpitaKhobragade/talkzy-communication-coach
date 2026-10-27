@@ -39,16 +39,8 @@ export function isLiveMode(): boolean {
   return activeProvider() !== null;
 }
 
-/**
- * Groq counts tokens per model, per minute and per day, so the two jobs use two models and each has its own
- * allowance. The spoken conversation needs speed and short replies, so it uses the smaller model
- * (GROQ_CHAT_MODEL). The written report needs to be accurate and honest: in our quality check the small
- * model missed mistakes and invented problems, so the report keeps the larger one (GROQ_REPORT_MODEL,
- * or GROQ_MODEL for older setups).
- */
-export function groqModel(purpose: "chat" | "report" = "report"): string {
-  if (purpose === "chat") return process.env.GROQ_CHAT_MODEL?.trim() || "openai/gpt-oss-20b";
-  return process.env.GROQ_REPORT_MODEL?.trim() || process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
+export function groqModel(): string {
+  return process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
 }
 
 const groqBase = () => (process.env.GROQ_BASE_URL?.trim() || "https://api.groq.com/openai/v1").replace(/\/$/, "");
@@ -57,47 +49,27 @@ interface GroqResponse {
   choices?: { message?: { content?: string | null } }[];
 }
 
-/** How long Groq asks us to wait before trying again (seconds), kept short so a student is not left waiting. */
-function retryDelayMs(res: Response): number {
-  const secs = Number(res.headers.get("retry-after"));
-  const ms = Number.isFinite(secs) && secs > 0 ? secs * 1000 : 3000;
-  return Math.min(ms, 8000);
-}
-
 async function generateGroq(req: LlmRequest): Promise<LlmResult> {
-  const model = groqModel(req.purpose);
-  const body = JSON.stringify({
-    model,
-    messages: [{ role: "system", content: req.system }, ...req.messages],
-    // gpt-oss spends part of the budget on hidden reasoning, so leave headroom for the answer.
-    max_completion_tokens: req.maxTokens,
-    reasoning_effort: "low",
-    include_reasoning: false,
-    temperature: req.purpose === "chat" ? 0.7 : 0.4,
+  const model = groqModel();
+  const res = await fetch(`${groqBase()}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: req.system }, ...req.messages],
+      // gpt-oss spends part of the budget on hidden reasoning, so leave headroom for the answer.
+      max_completion_tokens: req.maxTokens,
+      reasoning_effort: "low",
+      include_reasoning: false,
+      temperature: req.purpose === "chat" ? 0.7 : 0.4,
+    }),
+    signal: AbortSignal.timeout(45_000),
   });
-  // Groq limits how many tokens a key can use per minute. When several students finish at the same
-  // moment the limit can be hit (HTTP 429); waiting a few seconds and asking again almost always works.
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${groqBase()}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-      body,
-      signal: AbortSignal.timeout(45_000),
-    });
-    // A short wait fixes the per-minute limit. If Groq says to wait much longer (the daily allowance is
-    // used up), waiting here would only leave the student staring at the screen, so fail at once.
-    const retryAfterSec = Number(res.headers.get("retry-after"));
-    const longWait = Number.isFinite(retryAfterSec) && retryAfterSec > 20;
-    if ((res.status === 429 || res.status >= 500) && attempt < 2 && !longWait) {
-      await new Promise((r) => setTimeout(r, retryDelayMs(res)));
-      continue;
-    }
-    if (!res.ok) throw new Error(`groq_http_${res.status}`);
-    const data = (await res.json()) as GroqResponse;
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) throw new Error("groq_empty_reply");
-    return { text, model };
-  }
+  if (!res.ok) throw new Error(`groq_http_${res.status}`);
+  const data = (await res.json()) as GroqResponse;
+  const text = data.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("groq_empty_reply");
+  return { text, model };
 }
 
 async function generateAnthropic(req: LlmRequest): Promise<LlmResult> {

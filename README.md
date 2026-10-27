@@ -31,9 +31,7 @@ Each session has two phases and ends with a report.
 
 While the report is made, a **percentage and progress bar** show how far along it is. With the AI on, it usually takes about **3 seconds**.
 
-The report is short and written in simple English. It shows **what went well** (up to 2 points), **what to fix** (up to 2 points, each with the student's own words and what to try), **one "say it like this" example** and **one thing to practise today**. Tap **See the full report** for the rest.
-
-Points about the reading and the numbers (fillers, pace, how much was read) come from the measurements, so they are always true. The AI's own points are checked too: empty praise such as "you answered every question" is never shown.
+The report is short and written in simple English, in three parts: **reading**, **answering** and **camera** (only if the student turned the camera on). Each part shows the **one best thing**, the **one most important thing to fix** and **how to fix it**. Tap **More detail** for the rest.
 
 - **"Instead of this, say it like this"** takes sentences the student really said and shows a clearer way to say them. Every quote is checked against the transcript on the server, so the coach can never show something the student did not say.
 - Every number is labelled **Measured**, **Calculated** or **AI assessment**.
@@ -49,11 +47,7 @@ Points about the reading and the numbers (fillers, pace, how much was read) come
 
 ## Your subject, your goal, your modules
 
-The student chooses a **subject or specialization**, a **difficulty** and **what they want to improve** once, when they start. There is a different module for every subject, difficulty and goal (**8 x 3 x 5 = 120 modules**), each with its own passage, its own kind of activity and its own questions. The **Library shows only the three that match the student's subject and goal**, with their own level first, so nothing has to be chosen again. To change any of it, open **Profile** and tap a section. Everything then updates by itself.
-
-The coach asks questions **from easy to difficult**: questions 1 to 3 are warm-ups, 4 and 5 need a reason or an example, and from 6 on they ask for an opinion and a defence of it. The screen shows which kind of question it is.
-
-While the student speaks, their words appear **live** on screen (from the browser's own speech recogniser). The accurate text from Sarvam replaces them a moment after the student stops, and that is the text that is saved and measured.
+The student chooses a **subject or specialization**, a **difficulty** and **what they want to improve** once, when they start. After that the **Library shows only the modules for their subject** and nothing has to be chosen again: the coach's questions follow their goal too. To change any of it, open **Profile** and tap a section. Everything then updates by itself.
 
 <table>
   <tr>
@@ -75,7 +69,7 @@ Trends appear by themselves once there are two sessions to compare: filler words
   </tr>
 </table>
 
-More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/screenshots/03-library.png) and [start of a session](docs/screenshots/04-start-session.png).
+More screens: [onboarding](docs/screenshots/01-onboarding.png), [library of 24 modules](docs/screenshots/03-library.png) and [start of a session](docs/screenshots/04-start-session.png).
 
 ## What it measures, and what it never claims
 
@@ -90,11 +84,10 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/s
 - **Next.js 16** (App Router, Turbopack), **React 19**, **TypeScript**, **Tailwind CSS 4**, Zod for validation.
 - **Voice in:** [Silero VAD](https://github.com/snakers4/silero-vad) in the browser finds each stretch of speech, and each segment is sent through the app's own server route to **Sarvam** speech-to-text. The browser's own recogniser is an automatic fallback.
 - **Voice out:** **Cartesia Sonic** through a server route. The browser voice is the fallback.
-- **AI:** **Groq** writes the coach's replies (`openai/gpt-oss-20b`, fast) and the report (`openai/gpt-oss-120b`, more accurate). Anthropic is an optional alternative.
+- **AI:** **Groq** (`openai/gpt-oss-120b`) writes the coach's replies and the report. Anthropic is an optional alternative.
 - **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly. The models start loading as soon as the camera box is ticked, so they are ready when the session begins.
 - **Report files:** jsPDF, in the browser.
-- **Tests:** Vitest (785 unit tests, including checks of all 120 modules) and Playwright (25 end-to-end tests).
-- **AI quality check:** `npm run eval` runs made-up sessions with planted mistakes through the real AI and marks the result. See [How well does the AI feedback work?](docs/EVALUATION.md).
+- **Tests:** Vitest (141 unit tests) and Playwright (23 end-to-end tests).
 
 API keys are read only by server code and never sent to the browser. A Content-Security-Policy (`connect-src 'self'`) stops the page contacting any outside server.
 
@@ -122,7 +115,6 @@ cp .env.example .env.local      # Windows PowerShell: Copy-Item .env.example .en
 | Variable | Used for | Without it |
 |---|---|---|
 | `GROQ_API_KEY` | The coach's replies and the AI-written report | Development mode |
-| `GROQ_CHAT_MODEL`, `GROQ_REPORT_MODEL` | Optional. Which Groq models talk and write the report (defaults: `openai/gpt-oss-20b` and `openai/gpt-oss-120b`) | The defaults |
 | `SARVAM_API_KEY` | Speech-to-text for the student's voice | The browser's own recogniser |
 | `CARTESIA_API_KEY` and `CARTESIA_VOICE_ID` | The coach's spoken voice | The browser's own voice |
 | `ANTHROPIC_API_KEY` | Optional alternative to Groq | n/a |
@@ -158,12 +150,11 @@ No accounts and no passwords: a display name only. Under-13s need a guardian's c
 docs/                     Product, architecture, design, security, decisions and test plan
 src/app/                  Pages (home, library, practice, report, progress, profile, settings, privacy) and API routes
 src/components/           UI, including the reading and conversation screens
-src/features/content/     8 subjects x 3 levels x 5 goals = 120 modules (passage, key terms, questions easy to hard)
+src/features/content/     8 fields x 3 levels = 24 modules (passage, key terms, questions)
 src/features/speech/      Speech metrics, reading alignment, voice timing, recognition and synthesis
 src/features/vision/      On-device face and pose analysis
 src/features/coach/       Prompts, dev-mode coach, quote checking, rule-based coaching
-src/features/report/      The short report, and PDF and text export
-evals/                    The AI quality check (made-up sessions, marking, results)
+src/features/report/      PDF and text export
 src/features/progress/    Daily limit, streaks, trends, recommendations
 src/services/             Local storage, API client, hooks
 tests/unit, tests/e2e     Vitest and Playwright

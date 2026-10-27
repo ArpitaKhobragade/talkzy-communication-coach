@@ -17,7 +17,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Notice, PhaseSteps } from "@/components/ui";
 import { devCoachReply, openingMessage } from "@/features/coach/dev-coach";
-import { DIFFICULTY_LABEL, difficultyOfQuestion, questionNumberAfter } from "@/features/coach/ladder";
 import type { Goal, LearningModule } from "@/features/content/types";
 import type { CoachTurnRequest, Profile, Settings, Turn } from "@/features/session/types";
 import type { CaptureFatal, TurnCaptureLike } from "@/features/speech/capture";
@@ -87,7 +86,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [degraded, setDegraded] = useState(false);
   const [hasText, setHasText] = useState(false);
-  const [closingMessage, setClosingMessage] = useState(false);
 
   const run = useRef(0);
   const turnsRef = useRef<Turn[]>([]);
@@ -329,7 +327,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   async function coachSay(text: string, wrapUp: boolean, myRun: number) {
     if (myRun !== run.current || finished.current) return;
     closing.current = wrapUp;
-    setClosingMessage(wrapUp);
     addTurn({ role: "coach", text });
     setStatusBoth("coach");
     if (canSpeak) {
@@ -601,11 +598,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         >
           {label[status]}
         </p>
-        {(status === "coach" || status === "listening") && !closingMessage && (
-          <p className="mx-auto mt-2 text-xs font-extrabold uppercase tracking-wide text-muted" data-testid="question-level">
-            Question {questionNumberAfter(studentCount)}: {DIFFICULTY_LABEL[difficultyOfQuestion(questionNumberAfter(studentCount))]}
-          </p>
-        )}
         <p
           className="mx-auto mt-5 max-w-2xl text-[1.3rem] font-bold leading-snug tracking-tight md:text-[1.75rem] md:font-extrabold"
           aria-live="polite"

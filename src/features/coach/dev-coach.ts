@@ -1,4 +1,4 @@
-import { getGoal } from "../content/fields";
+import { GOAL_QUESTIONS, getGoal } from "../content/fields";
 import { getModule } from "../content/modules";
 import type { CoachTurnRequest, CoachTurnResponse } from "../session/types";
 import { countWords } from "../speech/metrics";
@@ -6,8 +6,7 @@ import { countWords } from "../speech/metrics";
 /**
  * DEVELOPMENT-MODE coach. This is a scripted question bank, NOT an AI: it does not understand
  * the student's answer. It exists so the full journey can be exercised without an API key,
- * and the UI labels it clearly. The module's questions are ordered from easy to difficult and
- * are asked in that order.
+ * and the UI labels it clearly.
  */
 
 export function openingMessage(moduleId: string, displayName: string): string {
@@ -36,7 +35,7 @@ const STRUCTURE_HINT: Record<string, string> = {
 
 export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
   const m = getModule(req.moduleId);
-  const goal = getGoal(m?.goal ?? req.goal);
+  const goal = getGoal(req.goal);
   const studentTurns = req.history.filter((h) => h.role === "student");
 
   if (req.event === "silence") {
@@ -51,8 +50,10 @@ export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
     return { mode: "dev", wrapUp: false, text: "Sorry, I didn't catch that clearly. Could you say it again, a little slower?" };
   }
 
-  // The module's follow-up questions, from easy to difficult.
-  const questions = m?.followUpQuestions ?? [];
+  // Passage questions first, with a question for the student's goal after each one.
+  const passageQs = m?.followUpQuestions ?? [];
+  const goalQs = GOAL_QUESTIONS[goal.id];
+  const questions = passageQs.flatMap((q, i) => (goalQs[i] ? [q, goalQs[i]] : [q]));
   const nextIndex = studentTurns.length - 1;
   const outOfQuestions = nextIndex >= questions.length;
   const closing = req.remainingSec < 45 || outOfQuestions;
@@ -69,5 +70,6 @@ export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
   const ack = ACKS[(studentTurns.length - 1) % ACKS.length];
   const short = countWords(lastAnswer) < 8;
   const prefix = short ? `${ack} ${LONGER_NUDGE}` : ack;
+  // After a very short answer, re-ask in a simpler way before moving on.
   return { mode: "dev", wrapUp: false, text: `${prefix} ${questions[nextIndex]}` };
 }

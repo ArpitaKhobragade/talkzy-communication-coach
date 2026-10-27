@@ -1,5 +1,4 @@
 import { devCoachReply } from "@/features/coach/dev-coach";
-import { keepOneQuestion } from "@/features/coach/one-question";
 import { generate, isLiveMode } from "@/features/coach/server/llm";
 import { buildChatMessages, coachSystemPrompt } from "@/features/coach/server/prompts";
 import { getModule } from "@/features/content/modules";
@@ -44,7 +43,7 @@ export async function POST(req: Request) {
       // Spoken replies are short, but reasoning models also spend tokens thinking; leave headroom.
       maxTokens: 800,
     });
-    const reply: CoachTurnResponse = { text: closing ? text.replace(/\s+/g, " ").trim() : keepOneQuestion(text), mode: "live", wrapUp: closing };
+    const reply: CoachTurnResponse = { text: text.replace(/\s+/g, " ").trim(), mode: "live", wrapUp: closing };
     return Response.json(reply);
   } catch (err) {
     // Do not log request content. Log only the error class so operators can see failures.

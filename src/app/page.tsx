@@ -4,7 +4,7 @@ import { ArrowRight, BookOpenText, ChatsCircle, Fire, Microphone } from "@phosph
 import Link from "next/link";
 import { BarChart, Ring } from "@/components/charts";
 import { Badge, ButtonLink, Card, EmptyState, IconChip, Notice, PageHeader, Stat } from "@/components/ui";
-import { getGoal } from "@/features/content/fields";
+import { getField, getGoal } from "@/features/content/fields";
 import { currentStreak, DAILY_LIMIT_SEC, minutesPerDay, planSession } from "@/features/progress/daily-limit";
 import { recommendNext } from "@/features/progress/stats";
 import { DevModeBanner, useCoachMode } from "@/services/use-coach-mode";
@@ -33,6 +33,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title={`Hi ${profile.displayName}!`}
+        subtitle={`${getField(profile.field).name} · ${getGoal(profile.goal).name}`}
         action={
           <Badge tone={streak > 0 ? "warn" : "neutral"} icon={<Fire size={14} weight="fill" aria-hidden />}>
             {streak > 0 ? `${streak}-day streak` : "Start your streak today"}
@@ -97,7 +98,7 @@ export default function DashboardPage() {
               <Notice tone="good">{plan.reason}</Notice>
             )}
             <ButtonLink href="/library" variant="secondary" size="lg">
-              Browse your modules
+              Browse all modules
             </ButtonLink>
           </div>
         </div>

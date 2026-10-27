@@ -9,7 +9,6 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "vitest run --config vitest.eval.config.ts",
     "test:e2e": "npm run build && playwright test",
     "setup:vision": "node scripts/setup-vision-assets.mjs",
     "postinstall": "node scripts/setup-vision-assets.mjs"

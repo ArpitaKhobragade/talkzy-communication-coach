@@ -42,7 +42,7 @@ export async function POST(req: Request) {
               (attempt > 0 ? `\n\nYour previous reply could not be parsed (${lastError}). Reply with ONLY the JSON object.` : ""),
           },
         ],
-        maxTokens: 1800,
+        maxTokens: 2500,
       });
       const checked = AiFeedbackSchema.parse(extractJson(text));
       const { feedback, droppedQuotes } = verifyFeedback(checked, studentAnswers);

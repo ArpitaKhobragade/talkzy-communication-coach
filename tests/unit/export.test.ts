@@ -48,49 +48,45 @@ const ctx: ReportContext = {
 const headings = (blocks: DocBlock[]) => blocks.filter((b) => b.t === "h2").map((b) => (b as { text: string }).text);
 
 describe("buildReportDocument", () => {
-  it("is the short report: what went well, what to fix, say it like this, practise today", () => {
+  it("has the three sections the student asked for, then practice and numbers", () => {
     const h = headings(buildReportDocument(session(), ctx));
-    expect(h).toEqual(["What went well", "What to fix", "Instead of this, say it like this", "Practise today"]);
+    expect(h.slice(0, 3)).toEqual(["1. How you did while reading", "2. How you did while answering", "3. Camera: your face and body"]);
+    expect(h).toContain("Practise before your next session");
+    expect(h).toContain("Your numbers");
   });
 
-  it("says what to fix and how to fix it", () => {
+  it("says what went well, what to fix and how to fix it, in each section", () => {
     const text = documentToText(buildReportDocument(session(), ctx));
-    expect(text).toMatch(/what to fix/i);
+    expect(text).toMatch(/What went well:/);
+    expect(text).toMatch(/What to fix:/);
     expect(text).toMatch(/How to fix it:/);
+    expect(text).toMatch(/Looking at the camera/);
+    expect(text).toMatch(/Your face while talking/);
   });
 
-  it("shows at most two points of each kind", () => {
-    const blocks = buildReportDocument(session(), ctx);
-    const section = (title: string) => {
-      const i = blocks.findIndex((b) => b.t === "h2" && b.text === title);
-      const rest = blocks.slice(i + 1);
-      const end = rest.findIndex((b) => b.t === "h2");
-      return (end < 0 ? rest : rest.slice(0, end)).filter((b) => b.t === "bullet");
-    };
-    expect(section("What went well").length).toBeLessThanOrEqual(2);
-    expect(section("What to fix").length).toBeLessThanOrEqual(2);
-    expect(section("What to fix").length).toBeGreaterThan(0);
-  });
-
-  it("includes one 'instead of this, say it like this' from the student's own words", () => {
+  it("includes 'instead of this, say it like this' from the student's own words", () => {
     const blocks = buildReportDocument(session(), ctx);
     const cmp = blocks.filter((b) => b.t === "compare") as Extract<DocBlock, { t: "compare" }>[];
-    expect(cmp).toHaveLength(1);
+    expect(cmp.length).toBeGreaterThanOrEqual(2);
     expect(cmp[0].said).toContain("um I think basically");
     expect(cmp[0].better).toBe("I think a long password is harder to guess because it has more combinations.");
     expect(documentToText(blocks)).toMatch(/Say it like this:/);
   });
 
-  it("is short: no transcript, no long sections, about one page", () => {
+  it("is honest when the camera was off, and keeps the no-feelings note when it was on", () => {
+    expect(documentToText(buildReportDocument(session({ withVision: false }), ctx))).toMatch(/camera was off/);
+    expect(documentToText(buildReportDocument(session(), ctx))).toMatch(/says nothing about how you feel/);
+  });
+
+  it("is short: the best points only, and no full transcript", () => {
     const text = documentToText(buildReportDocument(session({ keepTranscript: true }), ctx));
     expect(text).not.toMatch(/what was said/i);
-    expect(text).not.toMatch(/How you did while/);
-    expect(text.split("\n").length).toBeLessThan(40);
+    expect(text.split("\n").length).toBeLessThan(70);
   });
 
   it("explains why AI feedback is missing and names the student and topic", () => {
     const text = documentToText(buildReportDocument(session(), ctx));
-    expect(text).toMatch(/Development mode: no AI key./);
+    expect(text).toMatch(/Development mode: no AI key\./);
     expect(text).toContain("Asha");
     expect(text).toContain("Strong Passwords and Staying Safe Online");
   });
