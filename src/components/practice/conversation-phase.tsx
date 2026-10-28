@@ -9,19 +9,23 @@ import {
   Microphone,
   PaperPlaneRight,
   Pause,
+  Question,
   SignOut,
   SkipForward,
   SpeakerHigh,
   Timer,
 } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Notice, PhaseSteps } from "@/components/ui";
 import { devCoachReply, openingMessage } from "@/features/coach/dev-coach";
 import { DIFFICULTY_LABEL, difficultyOfQuestion, questionNumberAfter } from "@/features/coach/ladder";
 import type { Goal, LearningModule } from "@/features/content/types";
+import { commandIntent, confirmIntent, endIntent, endsUnfinished, isContinuation, looksLikeQuestion, nextCommand, stripNextCommand } from "@/features/practice/intents";
 import type { CoachTurnRequest, Profile, Settings, Turn } from "@/features/session/types";
-import type { CaptureFatal, TurnCaptureLike } from "@/features/speech/capture";
+import type { CaptureFatal, CaptureResult, TurnCaptureLike } from "@/features/speech/capture";
 import { createCapture, fallbackEngine, pickEngine, type EngineKind } from "@/features/speech/engine";
+import { watchForInterruption } from "@/features/speech/energy-barge";
+import { recognitionSupported } from "@/features/speech/recognition";
 import { speakCoach } from "@/features/speech/speaker";
 import { stopSpeaking, ttsSupported, type SpeakHandle } from "@/features/speech/synthesis";
 import type { VadSession } from "@/features/speech/vad-session";
@@ -30,19 +34,43 @@ import { requestCoachTurn } from "@/services/coach-api";
 import type { CoachMode } from "@/services/use-coach-mode";
 
 /**
- * The student is considered finished after this much quiet once some words have been heard.
- * Generous on purpose: people pause to think mid-answer, and cutting them off is worse than a
- * short wait. The "I'm done speaking" button ends an answer immediately.
+ * After the student has been quiet this long, the coach asks whether they are finished. Short enough that
+ * the conversation feels quick, long enough that a thinking pause does not count as the end.
  */
-const END_OF_TURN_MS = 3200;
+const DONE_CHECK_MS = 3000;
+/** After a very short answer the coach waits longer, because the student may still be thinking of what to add. */
+const DONE_CHECK_SHORT_MS = 5000;
+/** When the last words stop in the middle of a sentence ("and the", "because", "umm") the student is still thinking. */
+const DONE_CHECK_OPEN_MS = 6500;
+/** The student asked for time ("wait", "let me think"), so the coach keeps quiet for longer. */
+const DONE_CHECK_PATIENT_MS = 9000;
+const SHORT_ANSWER_WORDS = 8;
+/** An answer with this many words counts as an answer even if the student does not reply to "Are you done?". */
+const ENOUGH_WORDS = 12;
+/** After the student answers the coach's "are you done?", this much quiet means the reply is complete. */
+const REPLY_IDLE_MS = 1100;
+/** No reply at all to "are you done?" for this long: the coach takes it as yes and carries on. */
+const CONFIRM_WAIT_MS = 10_000;
 /** Nothing heard for this long: the coach gently offers help. */
-const SILENCE_MS = 12_000;
+const SILENCE_MS = 14_000;
+/** The same, after the student asked for time to think. */
+const PATIENT_SILENCE_MS = 35_000;
 /** Safety cap for a single spoken answer. */
 const MAX_ANSWER_MS = 90_000;
 /** After this many silent prompts in a row, wait for the student to press a button. */
 const MAX_SILENCES = 3;
+/** Interrupting the coach: speech must be clear (probability) and last this many frames (about half a second). */
+const BARGE_PROB = 0.85;
+const BARGE_FRAMES = 16;
+/** The coach's first moments are never interrupted, so a breath or a click cannot cut it off. */
+const BARGE_AFTER_MS = 900;
 
-type Status = "starting" | "coach" | "listening" | "thinking" | "paused";
+const ASK_DONE = "Are you done, or do you want to say more?";
+const ASK_NEXT = "Shall we move to the next question?";
+const ASK_AGAIN = "Sorry, I did not catch that. Shall we move on?";
+const SAY_LISTENING = "Okay, I am listening.";
+
+type Status = "starting" | "coach" | "listening" | "confirming" | "thinking" | "paused";
 
 const FATAL_TEXT: Record<CaptureFatal, string> = {
   "not-allowed": "Voice is blocked in this browser. Allow the microphone from the lock icon in the address bar, then press \"Try voice again\". You can also type.",
@@ -53,6 +81,19 @@ const FATAL_TEXT: Record<CaptureFatal, string> = {
   "cloud-stt": "The voice connection was interrupted. Press \"Try voice again\" to keep speaking, or type your answer.",
   vad: "Voice detection could not start. Press \"Try voice again\", or type your answer.",
 };
+
+/** An answer the student has spoken so far. It can grow if they say they want to add more. */
+interface PendingAnswer {
+  text: string;
+  speakingSec: number;
+  pauseCount: number;
+  longestPauseSec: number;
+  latencySec?: number;
+  lowConfidence?: boolean;
+}
+
+const wordCount = (t: string) => t.split(/\s+/).filter(Boolean).length;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 interface Props {
   module: LearningModule;
@@ -80,12 +121,13 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const [status, setStatus] = useState<Status>("starting");
   const [interim, setInterim] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string | null>(null);
   const [voiceOk, setVoiceOk] = useState(voiceCapable);
   const [typing, setTyping] = useState(!voiceCapable);
   const [typed, setTyped] = useState("");
   const [remaining, setRemaining] = useState(() => Math.max(0, Math.round((deadline - Date.now()) / 1000)));
   const [confirmEnd, setConfirmEnd] = useState(false);
-  const [degraded, setDegraded] = useState(false);
   const [hasText, setHasText] = useState(false);
   const [closingMessage, setClosingMessage] = useState(false);
 
@@ -106,36 +148,69 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const coachEndedAt = useRef(0);
   const degradedRef = useRef(false);
   const voiceOkRef = useRef(voiceCapable);
+  const cloudFailed = useRef(false);
   const levelBar = useRef<HTMLDivElement | null>(null);
   const lastLevelDraw = useRef(0);
   const statusRef = useRef<Status>("starting");
   const settingsRef = useRef(settings);
   const typedRef = useRef("");
+  const interimRef = useRef("");
+  const pending = useRef<PendingAnswer | null>(null);
+  const askedDone = useRef(false);
+  const unclearReplies = useRef(0);
+  const bargeRun = useRef(0);
+  const voiceNoted = useRef(false);
+  /** The place in the module's seven questions of the next question to ask (the opening question is 0 and is asked first). */
+  const ladder = useRef(1);
+  /** How many times the coach asked "Are you done?" for the answer being built. */
+  const confirmAsks = useRef(0);
+  /** True after the student asked for time ("wait", "let me think"): the coach waits longer and says nothing. */
+  const patient = useRef(false);
+  /** Stops the loudness watcher that hears the student speaking over the coach. */
+  const energyStop = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
   useEffect(() => {
     typedRef.current = typed;
   }, [typed]);
+  // The accurate voice detector can finish loading after the conversation has started. Later turns use it.
+  useEffect(() => {
+    inputsRef.current = { stream, vad };
+  }, [stream, vad]);
 
   const setStatusBoth = (s: Status) => {
     statusRef.current = s;
     setStatus(s);
   };
 
-  const stopPoll = useCallback(() => {
+  const stopPoll = () => {
     if (poll.current) clearInterval(poll.current);
     poll.current = null;
-  }, []);
+  };
 
-  const addTurn = useCallback((t: Omit<Turn, "id" | "at">) => {
+  const addTurn = (t: Omit<Turn, "id" | "at">) => {
     const turn: Turn = { ...t, id: newId(), at: Date.now() };
     turnsRef.current = [...turnsRef.current, turn];
     setTurns(turnsRef.current);
     return turn;
-  }, []);
+  };
 
-  const finish = useCallback(() => {
+  const showInterim = (text: string) => {
+    interimRef.current = text;
+    setInterim(text);
+  };
+
+  const abortCapture = () => {
+    stopPoll();
+    capture.current?.dispose();
+    capture.current = null;
+    showInterim("");
+    setHasText(false);
+  };
+
+  const finish = () => {
     if (finished.current) return;
     finished.current = true;
     stopPoll();
@@ -144,187 +219,74 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     capture.current?.dispose();
     capture.current = null;
     onFinish({ turns: turnsRef.current, degraded: degradedRef.current });
-  }, [onFinish, stopPoll]);
+  };
 
-  // ---- Listening ---------------------------------------------------------------------------
+  // ---- The coach's side ---------------------------------------------------------------------
 
-  const abortCapture = useCallback(() => {
-    stopPoll();
-    capture.current?.dispose();
-    capture.current = null;
-    setInterim("");
-    setHasText(false);
-  }, [stopPoll]);
+  /** Said once if the studio voice cannot be used: the browser voice takes over, and the student is told why. */
+  function noteVoiceFallback(reason?: string) {
+    if (voiceNoted.current) return;
+    voiceNoted.current = true;
+    setVoiceNote(`The coach is using your browser's voice now. ${reason ?? "The studio voice did not answer."}`);
+  }
 
-  const askCoach = useCallback(
-    async (event: CoachTurnRequest["event"], myRun: number) => {
-      setStatusBoth("thinking");
-      const secondsLeft = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-      const history = turnsRef.current.slice(-24).map((t) => ({ role: t.role, text: t.text.slice(0, 2000) }));
-      const req: CoachTurnRequest = {
-        moduleId: module.id,
-        goal,
-        level: module.level,
-        ageBand: profile.ageBand,
-        remainingSec: secondsLeft,
-        history,
-        event,
-      };
-      let reply: { text: string; wrapUp: boolean };
-      try {
-        const res = await requestCoachTurn(req);
-        if (coachMode === "live" && (res.mode === "dev" || res.degraded)) {
-          degradedRef.current = true;
-          setDegraded(true);
-        }
-        reply = { text: res.text, wrapUp: res.wrapUp };
-      } catch {
-        degradedRef.current = true;
-        setDegraded(true);
-        const local = devCoachReply(req);
-        reply = { text: local.text, wrapUp: local.wrapUp };
-        setNotice("We could not reach the coach service, so a simple scripted question was used instead.");
-      }
-      if (myRun !== run.current) return;
-      busy.current = false;
-      void coachSay(reply.text, reply.wrapUp || secondsLeft <= 0, myRun);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deadline, module.id, module.level, goal, profile.ageBand, coachMode],
-  );
+  function speakOptions() {
+    return {
+      rate: settingsRef.current.speechRate,
+      lang: settingsRef.current.speechLang,
+      cloud: ttsKind === "cartesia",
+      onFallback: noteVoiceFallback,
+    };
+  }
 
-  const submitAnswer = useCallback(
-    (text: string, inputMode: "voice" | "typed", extra: Partial<Turn>, myRun: number) => {
-      addTurn({ role: "student", text, inputMode, ...extra });
-      setInterim("");
-      setTyped("");
-      silences.current = 0;
-      setNotice(null);
-      void askCoach("answer", myRun);
-    },
-    [addTurn, askCoach],
-  );
+  /** The coach says a short line that is not part of the lesson, so it is not saved in the transcript. */
+  async function speakAside(text: string, myRun: number): Promise<boolean> {
+    setPrompt(text);
+    if (canSpeak) {
+      // These short lines use the browser voice: it starts at once, and it does not use up the studio voice credit.
+      const h = speakCoach(text, { ...speakOptions(), cloud: false });
+      speech.current = h;
+      await h.done;
+      speech.current = null;
+    } else {
+      await sleep(500);
+    }
+    return myRun === run.current && !finished.current;
+  }
 
-  const submitVoice = useCallback(
-    async (myRun: number) => {
-      const c = capture.current;
-      if (!c || busy.current) return;
-      busy.current = true;
-      stopPoll();
-      const res = await c.end();
-      if (myRun !== run.current) return;
-      c.dispose();
-      capture.current = null;
-      setInterim("");
-      setHasText(false);
-
-      const words = res.text.split(/\s+/).filter(Boolean).length;
-      if (!res.text || (res.confidence !== null && res.confidence < 0.4 && words < 4)) {
-        void askCoach("unclear", myRun);
-        return;
-      }
-      submitAnswer(
-        res.text,
-        "voice",
-        {
-          speakingSec: res.timing.speakingSec,
-          pauseCount: res.timing.pauseCount,
-          longestPauseSec: res.timing.longestPauseSec,
-          latencySec: res.timing.latencySec ?? undefined,
-          lowConfidence: res.confidence !== null && res.confidence < 0.6 ? true : undefined,
-        },
-        myRun,
-      );
-    },
-    [askCoach, submitAnswer, stopPoll],
-  );
-
-  const handleSilence = useCallback(
-    (myRun: number) => {
-      if (busy.current) return;
-      busy.current = true;
-      abortCapture();
-      silences.current += 1;
-      if (silences.current >= MAX_SILENCES) {
-        busy.current = false;
-        setStatusBoth("paused");
-        setNotice("No problem, take your time. Press the button when you are ready, or type your answer.");
-        setTyping(true);
-        return;
-      }
-      void askCoach("silence", myRun);
-    },
-    [askCoach, abortCapture],
-  );
-
-  const listen = useCallback(
-    (myRun: number) => {
-      if (myRun !== run.current || finished.current) return;
-      busy.current = false;
-      coachEndedAt.current = Date.now();
-      turnStartedAt.current = Date.now();
-      setStatusBoth("listening");
-      setHasText(false);
-      if (!voiceOkRef.current || engine.current === "none") return; // typed answers only
-
-      abortCapture();
-      const c = createCapture(engine.current, inputsRef.current, module.id, {
-        lang: settingsRef.current.speechLang,
-        onInterim: (t) => {
-          setInterim(t);
-          setHasText(t.replace(/\s*\.\.\.$/, "").length > 0);
-        },
-        onFatal: (reason) => {
-          abortCapture();
-          // Cloud recognition trouble: switch to the browser's recogniser and carry on speaking.
-          const next = reason === "cloud-stt" || reason === "vad" ? fallbackEngine(engine.current, inputsRef.current) : "none";
-          if (next !== "none") {
-            engine.current = next;
-            setNotice("The voice service had trouble, so your browser's voice recognition is being used instead. Keep speaking.");
-            setTimeout(() => listen(myRun), 400);
-            return;
-          }
-          // Otherwise keep voice available: the student can retry, or type.
-          voiceOkRef.current = false;
-          setVoiceOk(false);
-          setTyping(true);
-          setNotice(FATAL_TEXT[reason]);
-        },
-        onLevel: (lvl) => {
-          const now = performance.now();
-          if (now - lastLevelDraw.current > 80 && levelBar.current) {
-            lastLevelDraw.current = now;
-            levelBar.current.style.transform = `scaleX(${Math.max(0.03, lvl)})`;
-          }
-        },
-      });
-      if (!c) return;
-      capture.current = c;
-      c.begin();
-
-      poll.current = setInterval(() => {
-        const cur = capture.current;
-        if (!cur || busy.current || statusRef.current !== "listening") return;
-        const sinceTurn = Date.now() - turnStartedAt.current;
-        if (cur.hasText()) {
-          // Never cut in while a part of the answer is still being transcribed.
-          if ((!cur.isBusy() && cur.idleMs() > END_OF_TURN_MS) || sinceTurn > MAX_ANSWER_MS) void submitVoice(myRun);
-        } else if (cur.isBusy()) {
-          // Speech was heard and is being transcribed: wait for the result.
-        } else if (cur.idleMs() > SILENCE_MS) {
-          handleSilence(myRun);
-        } else if (sinceTurn > 30_000) {
-          // Sound was detected but nothing could be recognised.
-          busy.current = true;
-          abortCapture();
-          void askCoach("unclear", myRun);
-        }
-      }, 250);
-    },
-    [module.id, submitVoice, handleSilence, askCoach, abortCapture],
-  );
-
-  // ---- Coach speaking -------------------------------------------------------------------------
+  async function askCoach(event: CoachTurnRequest["event"], myRun: number) {
+    setStatusBoth("thinking");
+    setPrompt(null);
+    const secondsLeft = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+    const history = turnsRef.current.slice(-24).map((t) => ({ role: t.role, text: t.text.slice(0, 2000) }));
+    const req: CoachTurnRequest = {
+      moduleId: module.id,
+      goal,
+      level: module.level,
+      ageBand: profile.ageBand,
+      remainingSec: secondsLeft,
+      history,
+      event,
+      ladderIndex: ladder.current,
+    };
+    let reply: { text: string; wrapUp: boolean };
+    try {
+      const res = await requestCoachTurn(req);
+      if (coachMode === "live" && (res.mode === "dev" || res.degraded)) degradedRef.current = true;
+      reply = { text: res.text, wrapUp: res.wrapUp };
+    } catch {
+      degradedRef.current = true;
+      const local = devCoachReply(req);
+      reply = { text: local.text, wrapUp: local.wrapUp };
+      setNotice("We could not reach the coach service, so a simple scripted question was used instead.");
+    }
+    if (myRun !== run.current) return;
+    busy.current = false;
+    // An answer, or a skipped question, moves the lesson on to the next of the seven questions.
+    // A question from the student, silence and unclear speech do not.
+    if (event === "answer" || event === "skip") ladder.current += 1;
+    void coachSay(reply.text, reply.wrapUp || secondsLeft <= 0, myRun);
+  }
 
   async function coachSay(text: string, wrapUp: boolean, myRun: number) {
     if (myRun !== run.current || finished.current) return;
@@ -332,22 +294,437 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     setClosingMessage(wrapUp);
     addTurn({ role: "coach", text });
     setStatusBoth("coach");
+    setPrompt(null);
+    let watching = false;
     if (canSpeak) {
-      const h = speakCoach(text, {
-        rate: settingsRef.current.speechRate,
-        lang: settingsRef.current.speechLang,
-        cloud: ttsKind === "cartesia",
-        onFallback: () => setNotice("The coach's studio voice is unavailable right now, so the browser voice is being used."),
-      });
+      // While the coach talks, the student can speak over it: the coach stops and listens.
+      if (!wrapUp) watching = startBargeIn(myRun);
+      const h = speakCoach(text, speakOptions());
       speech.current = h;
       await h.done;
       speech.current = null;
     } else {
-      await new Promise((r) => setTimeout(r, 600));
+      await sleep(600);
     }
+    if (watching) await stopBargeIn(myRun);
     if (myRun !== run.current || finished.current) return;
     if (wrapUp || timeUp.current) finish();
     else listen(myRun);
+  }
+
+  // ---- Interrupting the coach ---------------------------------------------------------------
+
+  /** Starts listening for the student speaking over the coach. Returns false when that is not possible. */
+  function startBargeIn(myRun: number): boolean {
+    if (!settingsRef.current.bargeIn || !voiceOkRef.current) return false;
+    const v = inputsRef.current.vad;
+    if (!v || engine.current !== "cloud") {
+      // Without the accurate voice detector, the loudness of the microphone tells when the student speaks over the coach.
+      const stream = inputsRef.current.stream;
+      if (!stream || engine.current === "none") return false;
+      bargeRun.current = myRun;
+      energyStop.current = watchForInterruption(stream, () => interrupt(myRun));
+      return true;
+    }
+    bargeRun.current = myRun;
+    const t0 = performance.now();
+    let frames = 0;
+    v.setListener({
+      onSpeechStart: () => undefined,
+      onSegment: () => undefined,
+      onLevel: (p) => {
+        if (bargeRun.current !== myRun) return;
+        if (performance.now() - t0 < BARGE_AFTER_MS) {
+          frames = 0;
+          return;
+        }
+        frames = p > BARGE_PROB ? frames + 1 : 0;
+        if (frames >= BARGE_FRAMES) interrupt(myRun);
+      },
+    });
+    void v.start().catch(() => {
+      if (bargeRun.current === myRun) bargeRun.current = 0;
+    });
+    return true;
+  }
+
+  /** Stops watching for an interruption once the coach has finished. Does nothing if the student already interrupted. */
+  async function stopBargeIn(myRun: number) {
+    if (bargeRun.current !== myRun) return;
+    bargeRun.current = 0;
+    stopEnergyWatch();
+    const v = inputsRef.current.vad;
+    if (!v) return;
+    v.setListener(null);
+    await v.pause().catch(() => undefined);
+  }
+
+  function stopEnergyWatch() {
+    energyStop.current?.();
+    energyStop.current = null;
+  }
+
+  /** The student started talking over the coach: stop the coach at once and listen. */
+  function interrupt(myRun: number) {
+    if (bargeRun.current !== myRun || statusRef.current !== "coach" || closing.current || finished.current) return;
+    bargeRun.current = 0;
+    stopEnergyWatch();
+    const next = ++run.current;
+    speech.current?.cancel();
+    speech.current = null;
+    stopSpeaking();
+    setPrompt("Go ahead, I'm listening.");
+    listen(next);
+  }
+
+  // ---- The student's side -------------------------------------------------------------------
+
+  /** Joins what was just said to the answer so far. */
+  function addToPending(text: string, res?: CaptureResult) {
+    const prev = pending.current;
+    const t = res?.timing;
+    pending.current = prev
+      ? {
+          ...prev,
+          text: `${prev.text} ${text}`.trim(),
+          speakingSec: prev.speakingSec + (t?.speakingSec ?? 0),
+          pauseCount: prev.pauseCount + (t?.pauseCount ?? 0) + 1,
+          longestPauseSec: Math.max(prev.longestPauseSec, t?.longestPauseSec ?? 0),
+        }
+      : {
+          text,
+          speakingSec: t?.speakingSec ?? 0,
+          pauseCount: t?.pauseCount ?? 0,
+          longestPauseSec: t?.longestPauseSec ?? 0,
+          latencySec: t?.latencySec ?? undefined,
+          lowConfidence: res && res.confidence !== null && res.confidence < 0.6 ? true : undefined,
+        };
+  }
+
+  /** Sends the whole answer to the coach. */
+  function submitPending(myRun: number) {
+    const p = pending.current;
+    pending.current = null;
+    askedDone.current = false;
+    confirmAsks.current = 0;
+    patient.current = false;
+    unclearReplies.current = 0;
+    abortCapture();
+    setPrompt(null);
+    if (!p || !p.text) {
+      busy.current = true;
+      void askCoach("unclear", myRun);
+      return;
+    }
+    // A question or a request to the coach is answered first; it does not count as the answer to the lesson question.
+    const asking = looksLikeQuestion(p.text);
+    addTurn({
+      role: "student",
+      text: p.text,
+      inputMode: "voice",
+      speakingSec: p.speakingSec,
+      pauseCount: p.pauseCount,
+      longestPauseSec: p.longestPauseSec,
+      latencySec: p.latencySec,
+      lowConfidence: p.lowConfidence,
+    });
+    silences.current = 0;
+    setNotice(null);
+    busy.current = true;
+    void askCoach(asking ? "ask" : "answer", myRun);
+  }
+
+  /** The student asked for time ("wait", "let me think"). The coach says one short line and then stays quiet for longer. */
+  async function holdOn(myRun: number) {
+    patient.current = true;
+    abortCapture();
+    setStatusBoth("listening");
+    if (!(await speakAside("Sure, take your time.", myRun))) return;
+    listen(myRun);
+  }
+
+  /** The student stopped speaking. Ask whether they are finished, then act on what they say. */
+  async function endOfSpeech(myRun: number, direct = false) {
+    const c = capture.current;
+    if (!c || busy.current) return;
+    busy.current = true;
+    stopPoll();
+    const res = await c.end();
+    if (myRun !== run.current) return;
+    c.dispose();
+    capture.current = null;
+    showInterim("");
+    setHasText(false);
+
+    const text = res.text.trim();
+    if (text && endIntent(text)) {
+      endBySpeech();
+      return;
+    }
+    // "Repeat the question" and "give me a hint" are done at once, without asking "Are you done?".
+    const command = commandIntent(text);
+    if (command === "hold") {
+      busy.current = false;
+      void holdOn(myRun);
+      return;
+    }
+    if (command && !pending.current) {
+      busy.current = false;
+      if (command === "repeat") repeatQuestion();
+      else needHint();
+      return;
+    }
+    const words = wordCount(text);
+    if (!text || (res.confidence !== null && res.confidence < 0.4 && words < 4)) {
+      if (pending.current) void confirmTurn(myRun);
+      else void askCoach("unclear", myRun);
+      return;
+    }
+    // "...next question" at the end: the answer is finished, so there is no "Are you done?".
+    if (nextCommand(text)) {
+      const answer = stripNextCommand(text);
+      if (answer) addToPending(answer, res);
+      if (pending.current) submitPending(myRun);
+      else void skipQuestion(myRun);
+      return;
+    }
+    addToPending(text, res);
+    // A question to the coach is sent at once: the coach answers it and carries on.
+    if (direct || looksLikeQuestion(text)) submitPending(myRun);
+    else void confirmTurn(myRun);
+  }
+
+  /** The student said "next question" without answering: the coach moves on to the next question. */
+  function skipQuestion(myRun: number) {
+    abortCapture();
+    setPrompt(null);
+    busy.current = true;
+    void askCoach("skip", myRun);
+  }
+
+  /** Asks "Are you done?" (or "Should we move to the next question?") and listens for the reply. */
+  async function confirmTurn(myRun: number) {
+    busy.current = false;
+    setStatusBoth("confirming");
+    const first = !askedDone.current;
+    askedDone.current = true;
+    confirmAsks.current += 1;
+    const ok = await speakAside(first ? ASK_DONE : ASK_NEXT, myRun);
+    if (!ok || statusRef.current !== "confirming") return;
+    listenForReply(myRun);
+  }
+
+  function listenForReply(myRun: number) {
+    if (!voiceOkRef.current || engine.current === "none") return; // typed answers use the buttons
+    abortCapture();
+    // The browser's recogniser answers a short "yes" or "no" almost at once, so it is used for replies when it is there.
+    const kind: EngineKind = inputsRef.current.stream && recognitionSupported() ? "browser" : engine.current;
+    const c = createCapture(kind, inputsRef.current, module.id, {
+      lang: settingsRef.current.speechLang,
+      reply: true,
+      onInterim: (t) => {
+        showInterim(t);
+        setHasText(t.replace(/\s*\.\.\.$/, "").length > 0);
+      },
+      onFatal: () => {
+        // Cannot hear a reply: the buttons still work, and no reply means "yes" after a few seconds.
+        abortCapture();
+      },
+    });
+    if (!c) return;
+    capture.current = c;
+    c.begin();
+    const t0 = Date.now();
+    poll.current = setInterval(() => {
+      const cur = capture.current;
+      if (!cur || busy.current || statusRef.current !== "confirming") return;
+      if (cur.hasText()) {
+        if (!cur.isBusy() && cur.idleMs() > REPLY_IDLE_MS) void settleReply(myRun);
+      } else if (!cur.isBusy() && Date.now() - t0 > CONFIRM_WAIT_MS) {
+        // No reply. A full answer is taken as finished. A short one is probably not: the coach waits for more,
+        // quietly, and only takes it as finished the second time it has asked.
+        const enough = wordCount(pending.current?.text ?? "") >= ENOUGH_WORDS || confirmAsks.current >= 2;
+        if (enough) void decide("yes", "", undefined, myRun);
+        else {
+          abortCapture();
+          setPrompt("Take your time, I am listening.");
+          listen(myRun);
+        }
+      }
+    }, 250);
+  }
+
+  async function settleReply(myRun: number) {
+    const c = capture.current;
+    if (!c || busy.current) return;
+    busy.current = true;
+    stopPoll();
+    const res = await c.end();
+    if (myRun !== run.current) return;
+    c.dispose();
+    capture.current = null;
+    showInterim("");
+    setHasText(false);
+    busy.current = false;
+    const text = res.text.trim();
+    void decide(confirmIntent(text), text, res, myRun);
+  }
+
+  /** Acts on the student's reply to "Are you done?". */
+  async function decide(kind: ReturnType<typeof confirmIntent>, text: string, res: CaptureResult | undefined, myRun: number) {
+    if (myRun !== run.current || finished.current) return;
+    abortCapture();
+    if (kind === "end") return endBySpeech();
+    if (kind === "yes") return submitPending(myRun);
+    if (kind === "more") {
+      if (!(await speakAside(SAY_LISTENING, myRun))) return;
+      listen(myRun);
+      return;
+    }
+    // "Wait" or "let me think": the coach stays quiet and gives the student time.
+    if (text && commandIntent(text) === "hold") return holdOn(myRun);
+    // A question to the coach is answered at once. Anything longer than a few words that is not a command is more of the answer.
+    if (text && looksLikeQuestion(text)) {
+      addToPending(text, res);
+      return submitPending(myRun);
+    }
+    if (text && isContinuation(text)) {
+      addToPending(text, res);
+      void confirmTurn(myRun);
+      return;
+    }
+    unclearReplies.current += 1;
+    if (unclearReplies.current >= 2) return submitPending(myRun);
+    setStatusBoth("confirming");
+    if (!(await speakAside(ASK_AGAIN, myRun))) return;
+    listenForReply(myRun);
+  }
+
+  /** The student said they want to end the session. It ends at once, without another question. */
+  function endBySpeech() {
+    if (finished.current) return;
+    run.current++;
+    const p = pending.current;
+    pending.current = null;
+    abortCapture();
+    if (p?.text) addTurn({ role: "student", text: p.text, inputMode: "voice", speakingSec: p.speakingSec, pauseCount: p.pauseCount, longestPauseSec: p.longestPauseSec, latencySec: p.latencySec });
+    finish();
+  }
+
+  function handleSilence(myRun: number) {
+    if (busy.current) return;
+    busy.current = true;
+    abortCapture();
+    silences.current += 1;
+    if (silences.current >= MAX_SILENCES) {
+      busy.current = false;
+      setStatusBoth("paused");
+      setNotice("No problem, take your time. Press the button when you are ready, or type your answer.");
+      setTyping(true);
+      return;
+    }
+    if (silences.current === 1) {
+      // The first quiet moment: a short, kind line, not a new coach message. The student is probably just thinking.
+      void (async () => {
+        if (await speakAside("Take your time. I am listening.", myRun)) listen(myRun);
+      })();
+      return;
+    }
+    void askCoach("silence", myRun);
+  }
+
+  function listen(myRun: number) {
+    if (myRun !== run.current || finished.current) return;
+    busy.current = false;
+    coachEndedAt.current = Date.now();
+    turnStartedAt.current = Date.now();
+    setStatusBoth("listening");
+    setHasText(false);
+    if (!voiceOkRef.current || engine.current === "none") return; // typed answers only
+
+    // The accurate voice detector may have finished loading since the last turn.
+    if (engine.current === "browser" && inputsRef.current.vad && !cloudFailed.current) engine.current = "cloud";
+    abortCapture();
+    const c = createCapture(engine.current, inputsRef.current, module.id, {
+      lang: settingsRef.current.speechLang,
+      verbatim: true,
+      onInterim: (t) => {
+        showInterim(t);
+        setHasText(t.replace(/\s*\.\.\.$/, "").length > 0);
+        // Once the student is talking, "Go ahead, I'm listening." is no longer needed.
+        if (t) setPrompt((p) => (p && /listening/i.test(p) ? null : p));
+      },
+      onFatal: (reason) => {
+        abortCapture();
+        // Cloud recognition trouble: switch to the browser's recogniser and carry on speaking.
+        if (reason === "cloud-stt" || reason === "vad") cloudFailed.current = true;
+        const next = reason === "cloud-stt" || reason === "vad" ? fallbackEngine(engine.current, inputsRef.current) : "none";
+        if (next !== "none") {
+          engine.current = next;
+          setNotice("The voice service had trouble, so your browser's voice recognition is being used instead. Keep speaking.");
+          setTimeout(() => listen(myRun), 400);
+          return;
+        }
+        // Otherwise keep voice available: the student can retry, or type.
+        voiceOkRef.current = false;
+        setVoiceOk(false);
+        setTyping(true);
+        setNotice(FATAL_TEXT[reason]);
+      },
+      onLevel: (lvl) => {
+        const now = performance.now();
+        if (now - lastLevelDraw.current > 80 && levelBar.current) {
+          lastLevelDraw.current = now;
+          levelBar.current.style.transform = `scaleX(${Math.max(0.03, lvl)})`;
+        }
+      },
+    });
+    if (!c) return;
+    capture.current = c;
+    c.begin();
+
+    poll.current = setInterval(() => {
+      const cur = capture.current;
+      if (!cur || busy.current || statusRef.current !== "listening") return;
+      const sinceTurn = Date.now() - turnStartedAt.current;
+      // The student said they want to end the session while talking: do it as soon as they pause.
+      if (interimRef.current && endIntent(interimRef.current) && cur.idleMs() > 700) {
+        endBySpeech();
+        return;
+      }
+      // The student ended with "next question" or "that's all": move on as soon as they stop, without asking.
+      if (interimRef.current && nextCommand(interimRef.current) && cur.idleMs() > 700 && !cur.isBusy()) {
+        void endOfSpeech(myRun, true);
+        return;
+      }
+      // "Wait" or "let me think" alone: answer at once, so the coach gives the student time without a long delay.
+      if (interimRef.current && commandIntent(interimRef.current) === "hold" && cur.idleMs() > 600 && !cur.isBusy()) {
+        void endOfSpeech(myRun, true);
+        return;
+      }
+      if (cur.hasText()) {
+        // Never cut in while a part of the answer is still being transcribed.
+        // A sentence that stops in the middle ("... and the", "umm") means the student is still thinking.
+        const said = interimRef.current;
+        let wait = wordCount(said) < SHORT_ANSWER_WORDS ? DONE_CHECK_SHORT_MS : DONE_CHECK_MS;
+        if (endsUnfinished(said)) wait = Math.max(wait, DONE_CHECK_OPEN_MS);
+        if (patient.current) wait = Math.max(wait, DONE_CHECK_PATIENT_MS);
+        if ((!cur.isBusy() && cur.idleMs() > wait) || sinceTurn > MAX_ANSWER_MS) void endOfSpeech(myRun);
+      } else if (cur.isBusy()) {
+        // Speech was heard and is being transcribed: wait for the result.
+      } else if (cur.idleMs() > (patient.current ? PATIENT_SILENCE_MS : SILENCE_MS)) {
+        if (pending.current) {
+          // They said they had more to say, then said nothing: ask whether to move on.
+          abortCapture();
+          void confirmTurn(myRun);
+        } else handleSilence(myRun);
+      } else if (sinceTurn > 30_000) {
+        // Sound was detected but nothing could be recognised.
+        busy.current = true;
+        abortCapture();
+        void askCoach("unclear", myRun);
+      }
+    }, 250);
   }
 
   // ---- Lifecycle ------------------------------------------------------------------------------
@@ -359,6 +736,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     busy.current = false;
     silences.current = 0;
     degradedRef.current = false;
+    pending.current = null;
+    askedDone.current = false;
     // State is overwritten by the next addTurn(), so no reset is needed if React re-runs this effect.
     turnsRef.current = [];
     void coachSay(openingMessage(module.id, profile.displayName), false, myRun);
@@ -371,6 +750,13 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       stopSpeaking();
       capture.current?.dispose();
       capture.current = null;
+      energyStop.current?.();
+      energyStop.current = null;
+      const v = inputsRef.current.vad;
+      if (v && bargeRun.current) {
+        bargeRun.current = 0;
+        v.setListener(null);
+      }
     };
     // Runs once per mount; the opening message must not repeat when settings change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -383,8 +769,10 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       if (left > 0 || timeUp.current) return;
       timeUp.current = true;
       const st = statusRef.current;
-      if (st === "listening" || st === "paused") {
-        if (capture.current?.hasText()) void submitVoice(run.current);
+      if (st === "listening" || st === "paused" || st === "confirming") {
+        if (pending.current && st === "confirming") submitPending(run.current);
+        else if (capture.current?.hasText()) void endOfSpeech(run.current, true);
+        else if (pending.current) submitPending(run.current);
         else if (typedRef.current.trim()) submitTyped();
         else finish();
       }
@@ -392,9 +780,9 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deadline, submitVoice, finish]);
+  }, [deadline]);
 
-  // ---- Actions ------------------------------------------------------------------------------
+  // ---- Buttons --------------------------------------------------------------------------------
 
   /** End the session from the button. Whatever the student was saying right now is kept, not thrown away. */
   async function endNow() {
@@ -403,18 +791,11 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       busy.current = true;
       stopPoll();
       const res = await c.end();
-      if (res.text) {
-        addTurn({
-          role: "student",
-          text: res.text,
-          inputMode: "voice",
-          speakingSec: res.timing.speakingSec,
-          pauseCount: res.timing.pauseCount,
-          longestPauseSec: res.timing.longestPauseSec,
-          latencySec: res.timing.latencySec ?? undefined,
-        });
-      }
+      if (res.text) addToPending(res.text, res);
     }
+    const p = pending.current;
+    pending.current = null;
+    if (p?.text) addTurn({ role: "student", text: p.text, inputMode: "voice", speakingSec: p.speakingSec, pauseCount: p.pauseCount, longestPauseSec: p.longestPauseSec, latencySec: p.latencySec });
     finish();
   }
 
@@ -425,6 +806,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     speech.current?.cancel();
     speech.current = null;
     stopSpeaking();
+    if (bargeRun.current) void stopBargeIn(bargeRun.current);
     if (closing.current || timeUp.current) finish();
     else listen(myRun);
   }
@@ -432,6 +814,10 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   function submitTyped() {
     const text = typedRef.current.trim();
     if (!text || busy.current || statusRef.current === "thinking" || statusRef.current === "starting") return;
+    if (endIntent(text)) {
+      endBySpeech();
+      return;
+    }
     if (statusRef.current === "coach") {
       // Typing interrupts the coach's audio.
       if (closing.current) return;
@@ -441,8 +827,16 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       stopSpeaking();
     }
     busy.current = true;
+    pending.current = null;
+    askedDone.current = false;
     abortCapture();
-    submitAnswer(text.slice(0, 2000), "typed", {}, run.current);
+    setPrompt(null);
+    addTurn({ role: "student", text: text.slice(0, 2000), inputMode: "typed" });
+    showInterim("");
+    setTyped("");
+    silences.current = 0;
+    setNotice(null);
+    void askCoach("answer", run.current);
   }
 
   function repeatQuestion() {
@@ -453,9 +847,10 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     abortCapture();
     setStatusBoth("coach");
     setNotice(null);
+    setPrompt(null);
     (async () => {
       if (canSpeak) {
-        const h = speakCoach(last.text, { rate: settingsRef.current.speechRate, lang: settingsRef.current.speechLang, cloud: ttsKind === "cartesia" });
+        const h = speakCoach(last.text, speakOptions());
         speech.current = h;
         await h.done;
         speech.current = null;
@@ -479,10 +874,33 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     listen(++run.current);
   }
 
+  /** "Yes, next question" button. */
+  function confirmYes() {
+    if (statusRef.current !== "confirming") return;
+    const myRun = ++run.current;
+    speech.current?.cancel();
+    speech.current = null;
+    stopSpeaking();
+    submitPending(myRun);
+  }
+
+  /** "I want to say more" button. */
+  function confirmMore() {
+    if (statusRef.current !== "confirming") return;
+    const myRun = ++run.current;
+    speech.current?.cancel();
+    speech.current = null;
+    stopSpeaking();
+    abortCapture();
+    setPrompt("I'm listening.");
+    listen(myRun);
+  }
+
   /** After a voice problem: switch voice back on and start listening again. */
   function tryVoiceAgain() {
     if (busy.current && statusRef.current === "thinking") return;
     engine.current = pickEngine(inputsRef.current);
+    cloudFailed.current = false;
     voiceOkRef.current = engine.current !== "none";
     setVoiceOk(voiceOkRef.current);
     setNotice(engine.current === "none" ? "Voice is not available in this browser. Please type your answer." : null);
@@ -497,10 +915,12 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     starting: "Getting ready...",
     coach: "Coach is speaking",
     listening: voiceOk ? "Your turn: speak now" : "Your turn: type your answer",
+    confirming: voiceOk ? "Say yes or no" : "Are you done?",
     thinking: "Coach is thinking...",
     paused: "Take your time",
   };
-  const orbColor = status === "listening" ? "bg-good" : status === "coach" ? "bg-accent" : "bg-muted";
+  const live = status === "listening" || status === "confirming";
+  const orbColor = status === "listening" ? "bg-good" : status === "coach" || status === "confirming" ? "bg-accent" : "bg-muted";
   const studentCount = turns.filter((t) => t.role === "student").length;
 
   return (
@@ -511,9 +931,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="accent">Phase 2 of 2: Conversation</Badge>
-          <Badge tone={coachMode === "live" && !degraded ? "good" : "warn"}>
-            {coachMode === "live" && !degraded ? "AI coach" : "Scripted coach (dev mode)"}
-          </Badge>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <p className="inline-flex items-center gap-1.5 text-sm font-bold tabular-nums" role="timer" aria-label={`Time left ${mm}`}>
@@ -543,6 +960,11 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
           {notice}
         </Notice>
       )}
+      {voiceNote && (
+        <Notice tone="accent" role="status">
+          {voiceNote}
+        </Notice>
+      )}
       {voiceCapable && !voiceOk && (
         <Notice tone="accent" role="status">
           <div className="flex flex-wrap items-center gap-3">
@@ -569,7 +991,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       <div className="rounded-card border border-line bg-surface p-6 text-center shadow-card md:p-9">
         <div className="mx-auto grid h-28 w-28 place-items-center">
           <span className={`relative grid h-20 w-20 place-items-center rounded-full ${orbColor} text-white shadow-lift`} aria-hidden>
-            {(status === "coach" || status === "listening") && (
+            {(status === "coach" || status === "listening" || status === "confirming") && (
               <>
                 <span className={`orb-ring absolute -inset-2 rounded-full ${orbColor}`} />
                 <span className={`orb-ring orb-ring-2 absolute -inset-5 rounded-full ${orbColor}`} />
@@ -580,6 +1002,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
                 <Microphone size={34} weight="fill" />
               ) : status === "coach" ? (
                 <SpeakerHigh size={34} weight="fill" />
+              ) : status === "confirming" ? (
+                <Question size={34} weight="fill" />
               ) : status === "paused" ? (
                 <Pause size={34} weight="fill" />
               ) : (
@@ -590,7 +1014,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         </div>
         <p
           className={`mx-auto mt-3 inline-flex items-center rounded-full px-3 py-1 text-sm font-bold ${
-            status === "listening" ? "bg-good-soft text-good" : status === "coach" ? "bg-accent-soft text-accent-ink" : "bg-paper text-muted"
+            status === "listening" ? "bg-good-soft text-good" : status === "coach" || status === "confirming" ? "bg-accent-soft text-accent-ink" : "bg-paper text-muted"
           }`}
           role="status"
         >
@@ -608,8 +1032,13 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         >
           {lastCoach?.text ?? ""}
         </p>
+        {prompt && (
+          <p className="mx-auto mt-4 max-w-xl rounded-2xl bg-accent-soft px-4 py-2.5 text-[1.05rem] font-bold text-accent-ink" data-testid="coach-prompt" role="status">
+            {prompt}
+          </p>
+        )}
 
-        {status === "listening" && voiceOk && (
+        {live && voiceOk && (
           <div className="mx-auto mt-6 max-w-lg text-left">
             <div className="flex items-center gap-2.5" aria-hidden>
               <Microphone size={16} weight="fill" className="shrink-0 text-good" />
@@ -626,9 +1055,19 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
 
       <div className="flex flex-wrap gap-2.5">
         {status === "listening" && voiceOk && hasText && (
-          <Button size="lg" className="w-full sm:w-auto" icon={<CheckCircle size={20} weight="fill" aria-hidden />} onClick={() => void submitVoice(run.current)}>
+          <Button size="lg" className="w-full sm:w-auto" icon={<CheckCircle size={20} weight="fill" aria-hidden />} onClick={() => void endOfSpeech(run.current, true)}>
             I&apos;m done speaking
           </Button>
+        )}
+        {status === "confirming" && (
+          <>
+            <Button size="lg" icon={<CheckCircle size={20} weight="fill" aria-hidden />} onClick={confirmYes}>
+              Yes, next question
+            </Button>
+            <Button size="lg" variant="secondary" icon={<Microphone size={20} weight="fill" aria-hidden />} onClick={confirmMore}>
+              I want to say more
+            </Button>
+          </>
         )}
         {status === "paused" && (
           <Button size="lg" onClick={resumeFromPause}>
@@ -640,10 +1079,20 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
             Skip audio
           </Button>
         )}
-        <Button variant="secondary" icon={<ArrowCounterClockwise size={18} aria-hidden />} onClick={repeatQuestion} disabled={status === "thinking" || status === "starting"}>
+        <Button
+          variant="secondary"
+          icon={<ArrowCounterClockwise size={18} aria-hidden />}
+          onClick={repeatQuestion}
+          disabled={status === "thinking" || status === "starting" || status === "confirming"}
+        >
           Repeat the question
         </Button>
-        <Button variant="secondary" icon={<Lightbulb size={18} aria-hidden />} onClick={needHint} disabled={status === "thinking" || status === "starting" || status === "coach"}>
+        <Button
+          variant="secondary"
+          icon={<Lightbulb size={18} aria-hidden />}
+          onClick={needHint}
+          disabled={status === "thinking" || status === "starting" || status === "coach" || status === "confirming"}
+        >
           I need a hint
         </Button>
         <Button variant="secondary" icon={<Keyboard size={18} aria-hidden />} onClick={() => setTyping((v) => !v)} aria-expanded={typing}>
@@ -679,7 +1128,9 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       )}
 
       <details className="rounded-2xl border border-line bg-surface p-4">
-        <summary className="cursor-pointer font-semibold">Conversation so far ({studentCount} answer{studentCount === 1 ? "" : "s"})</summary>
+        <summary className="cursor-pointer font-semibold">
+          Conversation so far ({studentCount} answer{studentCount === 1 ? "" : "s"})
+        </summary>
         <ol className="mt-4 space-y-3 text-sm">
           {turns.map((t) => (
             <li
@@ -694,7 +1145,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
           ))}
         </ol>
       </details>
-
     </div>
   );
 }

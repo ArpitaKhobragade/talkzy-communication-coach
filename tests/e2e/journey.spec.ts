@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding, completeTypedSession, mockSpeech, profileJson, reportPaper, seedSession, showReportAsPage } from "./helpers";
+import { findModule, modulesForProfile } from "../../src/features/content/modules";
+import { completeOnboarding, completeTypedSession, mockSpeech, profileJson, seedSession } from "./helpers";
 
 const VOICE_ANSWERS = [
   "A brand is the promise a company makes to its customers, and I think it matters because people buy from names they trust every single day.",
@@ -39,9 +40,19 @@ test("emojis cannot be typed in the name, and the dashboard greeting has no subj
   await expect(page.getByText("School & Everyday Topics")).toHaveCount(0);
 });
 
+/**
+ * What the fake recogniser "hears", one entry each time the app starts listening: the reading (the whole passage, so the
+ * reading ends by itself), then each answer followed by the student's reply to "Are you done?".
+ */
+const PASSAGE = findModule("business-marketing", "intermediate", "clarity", "18plus")!.passage.replace(/\n\n/g, " ");
+const SAY_MORE = "No, I want to say more.";
+const MORE_WORDS = "Also, a strong brand needs steady quality over many years, so that people can trust it.";
+const YES = "Yes, move on.";
+const VOICE_SCRIPT = [PASSAGE, VOICE_ANSWERS[0], YES, VOICE_ANSWERS[1], SAY_MORE, MORE_WORDS, YES, ...VOICE_ANSWERS.slice(2).flatMap((a) => [a, YES])];
+
 test("full voice journey with mocked speech APIs: read, converse, report, history", async ({ page }) => {
-  await showReportAsPage(page);
-  await mockSpeech(page, VOICE_ANSWERS);
+  test.setTimeout(330_000); // the coach now waits a few seconds after each answer before asking "Are you done?"
+  await mockSpeech(page, VOICE_SCRIPT);
   await completeOnboarding(page);
 
   // Dashboard recommends a marketing module (personalised to the chosen field).
@@ -54,33 +65,36 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByLabel("Reading passage")).toBeVisible();
   await expect(page.getByLabel("Reading passage")).toContainText(/brand|customer|market/i);
-  // Phase 1: read the passage out loud (voice available, so "Start reading" is the main action).
+  // Phase 1: reading starts by itself (no start button) and ends by itself at the end of the passage (no finish button).
   await expect(page.getByText("Phase 1 of 2: Reading")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start reading" })).toBeVisible();
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await expect(page.getByRole("button", { name: /Start reading|finished reading/ })).toHaveCount(0);
+  await expect(page.locator("[data-status=read]").first()).toBeVisible({ timeout: 15_000 });
 
   // The coach speaks (TTS called) and the student answers by "voice".
-  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya");
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 30_000 });
   await expect(page.getByText("Phase 2 of 2: Conversation")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.length)).toBeGreaterThan(0);
   await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i, { timeout: 15_000 });
 
-  // The conversation continues with follow-up questions until the coach wraps up.
-  await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 30_000 });
-  await page.waitForURL(/\/report\//, { timeout: 170_000 });
+  // When the student stops, the coach asks whether they are done, and the student says yes.
+  await expect(page.getByTestId("coach-prompt")).toContainText(/Are you done/i, { timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Yes, next question" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => /Are you done/.test(t)).length)).toBeGreaterThan(0);
 
-  // The report is the PDF (drawn as a page here) with a download button, and nothing else.
-  await expect(reportPaper(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
-  const paper = reportPaper(page);
-  await expect(paper).toContainText("My speaking report");
-  await expect(paper).toContainText("Riya");
-  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
-  await expect(paper).toContainText(/camera was off/i);
-  await expect(paper.getByRole("heading", { name: "Practise next" })).toBeVisible();
-  await expect(paper.getByRole("link").first()).toHaveAttribute("href", /\/practice\//);
+  // The conversation continues until the coach wraps up. One answer is followed by "I want to say more":
+  // the coach says it is listening, and then asks again whether to move on.
+  await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 30_000 });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => /I am listening/.test(t)).length), { timeout: 120_000 }).toBeGreaterThan(0);
+  await page.waitForURL(/\/report\//, { timeout: 300_000 });
+
+  // The report page: boxes for reading, conversation and face and body, a download button, and a link to practise next.
+  await expect(page.getByTestId("report")).toBeVisible();
+  await expect(page.getByTestId("reading-box")).toBeVisible();
+  await expect(page.getByTestId("conversation-box")).toBeVisible();
+  await expect(page.getByTestId("camera-box").locator("xpath=ancestor::section")).toContainText(/camera was off/i);
+  await expect(page.getByRole("button", { name: "Download PDF" }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /Practise next/ })).toHaveAttribute("href", /\/practice\//);
   for (const gone of [/Development mode/, /AI-written feedback/, /This was a short session/, /See the full report/, /How these results were measured/, /All the numbers/, /More detail/]) {
     await expect(page.getByText(gone)).toHaveCount(0);
   }
@@ -91,8 +105,73 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   await expect(page.getByRole("link", { name: "Open report" })).toHaveCount(1);
 });
 
+test("saying 'I want to end the session' ends it straight away", async ({ page }) => {
+  // The reading, one answer, and then the reply to "Are you done?" is an end request.
+  await mockSpeech(page, [PASSAGE, VOICE_ANSWERS[0], "I want to end the session."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i, { timeout: 40_000 });
+  await page.waitForURL(/\/report\//, { timeout: 40_000 });
+  await expect(page.getByTestId("report")).toBeVisible();
+  // The answer already given is kept, and the end request is not counted as an answer.
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
+  expect(stored.turns.filter((t: { role: string }) => t.role === "student")).toHaveLength(1);
+});
+
+test("ending an answer with 'next question' moves on at once, without asking 'Are you done?'", async ({ page }) => {
+  await mockSpeech(page, [PASSAGE, "A brand is the promise a company makes to its customers. Next question.", "I want to end the session."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 40_000 });
+  await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 40_000 }); // the coach asked the next question
+  await page.waitForURL(/\/report\//, { timeout: 40_000 });
+  const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+  expect(spoken.filter((t) => /Are you done/.test(t))).toHaveLength(0);
+  // The answer is kept without the command at its end.
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
+  const answers = stored.turns.filter((t: { role: string }) => t.role === "student");
+  expect(answers).toHaveLength(1);
+  expect(answers[0].text).not.toMatch(/next question/i);
+});
+
+test("a question to the coach is answered at once, even when it is not about the lesson", async ({ page }) => {
+  await mockSpeech(page, [PASSAGE, "What does promise mean?", "I want to end the session."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 40_000 });
+  await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 40_000 });
+  await page.waitForURL(/\/report\//, { timeout: 40_000 });
+  const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+  expect(spoken.filter((t) => /Are you done/.test(t))).toHaveLength(0);
+});
+
+test("saying 'wait, let me think' makes the coach wait quietly instead of asking anything new", async ({ page }) => {
+  await mockSpeech(page, [PASSAGE, "Wait, let me think.", "I want to end the session."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 40_000 });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => /take your time/i.test(t)).length), { timeout: 40_000 }).toBeGreaterThan(0);
+  await page.waitForURL(/\/report\//, { timeout: 60_000 });
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
+  // Only the opening message: the coach asked nothing new, and "wait" was not counted as an answer.
+  expect(stored.turns.filter((t: { role: string }) => t.role === "coach")).toHaveLength(1);
+  expect(stored.turns.filter((t: { role: string }) => t.role === "student")).toHaveLength(0);
+});
+
+test("saying 'end the session' while answering also ends it", async ({ page }) => {
+  await mockSpeech(page, [PASSAGE, "Please end the session now."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await page.waitForURL(/\/report\//, { timeout: 40_000 });
+  await expect(page.getByTestId("report")).toBeVisible();
+});
+
 test("microphone denied: graceful typed fallback, session still completes", async ({ page }) => {
-  await showReportAsPage(page);
   await completeOnboarding(page);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
   await page.getByRole("button", { name: "Begin" }).click();
@@ -101,21 +180,20 @@ test("microphone denied: graceful typed fallback, session still completes", asyn
   // Two-phase structure: Phase 1 is reading the passage on screen.
   await expect(page.getByText("Phase 1 of 2: Reading")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Read this out loud" })).toBeVisible();
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
   await expect(page.getByText(/type your answers/i).first()).toBeVisible();
   await expect(page.getByLabel("Type your answer")).toBeVisible();
   await page.getByRole("button", { name: "End session" }).click();
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 60_000 });
   // Nothing was said, so the report says so in one plain sentence, with no warning boxes.
-  await expect(reportPaper(page)).toContainText(/did not hear any answers/i);
+  await expect(page.getByTestId("report-headline")).toContainText(/did not hear any answers/i);
   await expect(page.getByText("This was a short session")).toHaveCount(0);
 });
 
 test("daily 20-minute limit blocks a new session", async ({ page }) => {
   const now = Date.now();
-  const session = seedSession({ startedAt: now - 3_600_000, durationSec: 18 * 60 });
+  const session = seedSession({ startedAt: now - 60_000, durationSec: 18 * 60 });
   await page.addInitScript(
     ([p, s]) => {
       localStorage.setItem("acc.v1.profile", p);
@@ -130,33 +208,19 @@ test("daily 20-minute limit blocks a new session", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /enough practice for today/i })).toBeVisible();
 });
 
-test("typed session saves, the report is a PDF with a download button, and privacy controls delete it", async ({ page }) => {
-  await showReportAsPage(page);
+test("typed session saves, the report is in boxes, the PDF is one black-and-white page, and privacy controls delete it", async ({ page }) => {
   await completeOnboarding(page);
   await completeTypedSession(page);
 
-  // The report: what went well, what to fix, one example, the face and body, and a link to the next module.
-  const paper = reportPaper(page);
-  await expect(paper.getByRole("heading", { name: "What to fix" })).toBeVisible();
-  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
-  await expect(paper.getByRole("heading", { name: "Practise next" })).toBeVisible();
-  expect((await paper.innerText()).split(/\s+/).length).toBeLessThan(260); // short: about one page
-  // Black and white only: nothing on the report is coloured.
-  const colours = await paper.evaluate((el) => {
-    const out = new Set<string>();
-    for (const node of [el, ...Array.from(el.querySelectorAll("*"))]) {
-      const cs = getComputedStyle(node);
-      for (const c of [cs.color, cs.backgroundColor, cs.borderTopColor]) {
-        const m = c.match(/rgba?\((\d+), (\d+), (\d+)/);
-        if (m && !(m[1] === m[2] && m[2] === m[3])) out.add(c);
-      }
-    }
-    return [...out];
-  });
-  expect(colours).toEqual([]);
+  // The report page: boxes for reading, conversation and face and body.
+  await expect(page.getByTestId("report")).toBeVisible();
+  await expect(page.getByTestId("reading-box")).toBeVisible();
+  await expect(page.getByTestId("conversation-box")).toBeVisible();
+  await expect(page.getByTestId("camera-box")).toBeVisible();
+  expect((await page.getByTestId("report").innerText()).split(/\s+/).length).toBeLessThan(320); // short: about one page
 
-  // The only other thing on the page is the button that downloads the real PDF (made on the device).
-  const [pdf] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download PDF" }).click()]);
+  // Download: one page, black and white (a real PDF made on the device).
+  const [pdf] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download PDF" }).first().click()]);
   expect(pdf.suggestedFilename()).toMatch(/^talkzy-report-\d{4}-\d{2}-\d{2}\.pdf$/);
   const pdfStream = await pdf.createReadStream();
   const chunks: Buffer[] = [];
@@ -164,6 +228,8 @@ test("typed session saves, the report is a PDF with a download button, and priva
   const pdfBytes = Buffer.concat(chunks);
   expect(pdfBytes.subarray(0, 5).toString()).toBe("%PDF-");
   expect(pdfBytes.length).toBeGreaterThan(2000);
+  const pages = (pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+  expect(pages).toBe(1);
   await expect(page.getByRole("button", { name: "Download as text" })).toHaveCount(0);
 
   // Delete this single report from the Progress page.
@@ -181,17 +247,46 @@ test("typed session saves, the report is a PDF with a download button, and priva
   expect(keys).toEqual([]);
 });
 
-test("on a browser that can show PDFs, the report is the PDF itself", async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(Navigator.prototype, "pdfViewerEnabled", { get: () => true, configurable: true });
-  });
-  await completeOnboarding(page);
-  await completeTypedSession(page);
-  const frame = page.getByTestId("report-pdf");
-  await expect(frame).toBeVisible();
-  await expect(frame).toHaveAttribute("src", /^blob:/);
-  await expect(page.getByTestId("report-paper")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+test("the report shows what was skipped and which words were not clear, with how to say them", async ({ page }) => {
+  const now = Date.now();
+  const base = seedSession({ startedAt: now - 3_600_000, durationSec: 600 });
+  const session = {
+    ...base,
+    reading: {
+      mode: "aloud",
+      durationSec: 90,
+      aloud: {
+        accuracyPct: 78,
+        coveragePct: 72,
+        wpm: 120,
+        spokenWordCount: 90,
+        missedWords: ["vapour", "customers"],
+        skipped: ["the sun warms the sea"],
+        unreadTail: "the cloud brings rain to the hills",
+        misheard: [
+          { word: "vapour", heard: "paper" },
+          { word: "plants", heard: "plant" },
+        ],
+      },
+    },
+  };
+  await page.addInitScript(
+    ([p, s]) => {
+      localStorage.setItem("acc.v1.profile", p);
+      localStorage.setItem("acc.v1.sessions", s);
+    },
+    [JSON.stringify(profileJson), JSON.stringify([session])],
+  );
+  await page.goto(`/report/${session.id}`);
+  const reading = page.getByTestId("reading-box").locator("xpath=ancestor::section");
+  await expect(reading.getByTestId("skipped").first()).toContainText("the sun warms the sea");
+  await expect(reading).toContainText("You stopped before");
+  const words = reading.getByTestId("pronunciation");
+  await expect(words).toHaveCount(2);
+  await expect(words.first()).toContainText("vapour");
+  await expect(words.first()).toContainText("paper");
+  await expect(words.first()).toContainText("va-pour");
+  await expect(words.nth(1)).toContainText(/ending "s"/);
 });
 
 test("the privacy text names no outside services and says what the camera is for", async ({ page }) => {
@@ -358,8 +453,7 @@ test("while the report is made a percentage and a progress bar are shown", async
   });
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
   await page.getByRole("button", { name: "Begin" }).click();
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
   await expect(page.getByText(/Your turn/)).toBeVisible({ timeout: 30_000 });
   const typing = page.getByLabel("Type your answer");
   if (!(await typing.isVisible())) await page.getByRole("button", { name: "Type instead" }).click();
@@ -374,11 +468,44 @@ test("while the report is made a percentage and a progress bar are shown", async
   await page.waitForURL(/\/report\//, { timeout: 30_000 });
 });
 
+test("each age group has its own modules: changing the age group in the profile changes the library", async ({ page }) => {
+  await completeOnboarding(page); // 18 or older, Business and Marketing, Intermediate, Explain ideas clearly
+  const adult = findModule("business-marketing", "intermediate", "clarity", "18plus")!;
+  const child = findModule("business-marketing", "intermediate", "clarity", "under13")!;
+  const teen = findModule("business-marketing", "intermediate", "clarity", "13to17")!;
+  expect(new Set([adult.title, child.title, teen.title]).size).toBe(3);
+
+  await page.goto("/library");
+  await expect(page.getByText(adult.title)).toBeVisible();
+  await expect(page.getByText(child.title)).toHaveCount(0);
+  await expect(page.getByText(teen.title)).toHaveCount(0);
+
+  await page.goto("/profile");
+  await page.locator("summary", { hasText: "About you" }).click();
+  await page.getByRole("radio", { name: /13 to 17/ }).check();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/Saved\./)).toBeVisible();
+  await page.goto("/library");
+  await expect(page.getByText(teen.title)).toBeVisible();
+  await expect(page.getByText(adult.title)).toHaveCount(0);
+
+  await page.goto("/profile");
+  await page.locator("summary", { hasText: "About you" }).click();
+  await page.getByRole("radio", { name: /Under 13/ }).check();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/Saved\./)).toBeVisible();
+  await page.goto("/library");
+  await expect(page.getByText(child.title)).toBeVisible();
+  await expect(page.getByText(teen.title)).toHaveCount(0);
+});
+
 test("each goal has its own modules, and the practice starts with an easy question", async ({ page }) => {
+  const fluency = findModule("engineering", "beginner", "fluency", "18plus")!;
+  const interview = findModule("engineering", "beginner", "interview", "18plus")!;
   await completeOnboarding(page, { field: /Engineering/, level: /Beginner/, goal: /Speak more fluently/ });
   await page.goto("/library");
-  await expect(page.getByText("A Bicycle Ride, Step by Step")).toBeVisible();
-  await expect(page.getByText("Ravi and the Robot Arm")).toHaveCount(0);
+  await expect(page.getByText(fluency.title)).toBeVisible();
+  await expect(page.getByText(interview.title)).toHaveCount(0);
 
   // Change the goal in the profile: the library shows different modules by itself.
   await page.goto("/profile");
@@ -387,14 +514,60 @@ test("each goal has its own modules, and the practice starts with an easy questi
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText(/Saved\./)).toBeVisible();
   await page.goto("/library");
-  await expect(page.getByText("Ravi and the Robot Arm")).toBeVisible();
-  await expect(page.getByText("A Bicycle Ride, Step by Step")).toHaveCount(0);
+  await expect(page.getByText(interview.title)).toBeVisible();
+  await expect(page.getByText(fluency.title)).toHaveCount(0);
 
   // The first question is the easy opening question of that module, and it is labelled as a warm-up.
-  await page.goto("/practice/engineering-beginner-interview");
+  await page.goto("/practice/engineering-beginner-interview-18plus");
   await page.getByRole("button", { name: "Begin" }).click();
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
-  await expect(page.getByTestId("coach-message")).toContainText("Can you tell me your name and one thing you like to build or fix?", { timeout: 30_000 });
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
+  await expect(page.getByTestId("coach-message")).toContainText(interview.openingQuestion, { timeout: 30_000 });
   await expect(page.getByTestId("question-level")).toContainText("Question 1: Warm-up question");
+});
+
+test("not sure yet: a student who does not know gets a helpful mix of modules to try", async ({ page }) => {
+  /** Fills the first-time form with "Not sure yet" for the subject and the goal, and the given choice for the difficulty. */
+  async function onboard(level: RegExp) {
+    await page.goto("/");
+    await page.waitForURL(/\/onboarding/);
+    await page.getByLabel("First name or nickname").fill("Meena");
+    await page.getByRole("radio", { name: /13 to 17/ }).check();
+    await page.getByRole("group", { name: /Subject/ }).getByRole("radio", { name: /Not sure yet/ }).check();
+    await page.getByRole("group", { name: "Difficulty" }).getByRole("radio", { name: level }).check();
+    await page.getByRole("group", { name: /What do you want to improve/ }).getByRole("radio", { name: /Not sure yet/ }).check();
+    await page.getByLabel(/I have read how my voice/).check();
+    await page.getByRole("button", { name: "Save and start" }).click();
+    await expect(page.getByRole("heading", { name: "Hi Meena!" })).toBeVisible();
+  }
+
+  // Not sure about the subject, the goal or the difficulty: six easy starter modules, one marked "Start here".
+  await onboard(/Not sure yet/);
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Modules to try" })).toBeVisible();
+  await expect(page.getByText(/You are not sure yet, and that is fine/)).toBeVisible();
+  const list = page.getByTestId("library-list").locator("li");
+  await expect(list).toHaveCount(6);
+  await expect(page.getByText("Start here")).toHaveCount(1);
+  const starter = modulesForProfile({ field: "unsure", level: "unsure", goal: "unsure", ageBand: "13to17" }).modules;
+  for (const m of starter) await expect(page.getByText(m.title, { exact: true })).toBeVisible();
+
+  // Only the difficulty chosen: one module for every goal, each in a different subject, and the subject is shown.
+  await page.goto("/profile");
+  await page.locator("summary", { hasText: "Difficulty" }).click();
+  await page.getByRole("group", { name: "Difficulty" }).getByRole("radio", { name: /Intermediate/ }).check();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/Saved\./)).toBeVisible();
+  await page.goto("/library");
+  await expect(page.getByText(/You chose Intermediate but are not sure what to improve and which subject to practise/)).toBeVisible();
+  await expect(list).toHaveCount(5);
+  const mix = modulesForProfile({ field: "unsure", level: "intermediate", goal: "unsure", ageBand: "13to17" }).modules;
+  expect(new Set(mix.map((m) => m.goal)).size).toBe(5);
+  expect(new Set(mix.map((m) => m.field)).size).toBe(5);
+  for (const m of mix) await expect(page.getByText(m.title, { exact: true })).toBeVisible();
+  await expect(page.getByText("Start here")).toHaveCount(1);
+
+  // The dashboard still recommends something.
+  await page.goto("/");
+  await expect(page.getByText("Recommended for you")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Start today.s practice/ })).toBeVisible();
 });

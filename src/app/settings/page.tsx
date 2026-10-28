@@ -40,6 +40,7 @@ export default function SettingsPage() {
   const sessions = useSessions();
   const hydrated = useHydrated();
   const [message, setMessage] = useState<string | null>(null);
+  const [voiceCheck, setVoiceCheck] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"transcripts" | "all" | null>(null);
   const rateId = useId();
 
@@ -58,6 +59,17 @@ export default function SettingsPage() {
     setMessage("Your data was downloaded as a file.");
   }
 
+  async function checkVoice() {
+    setVoiceCheck("checking");
+    try {
+      const res = await fetch("/api/voice/tts?check=1", { cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; hint?: string };
+      setVoiceCheck(data.hint ?? (data.ok ? "The studio voice is working." : "The studio voice is not working."));
+    } catch {
+      setVoiceCheck("Could not reach the voice check. Check your internet connection.");
+    }
+  }
+
   const withTranscripts = sessions.filter((s) => s.transcriptKept && s.turns.length > 0).length;
 
   return (
@@ -73,6 +85,26 @@ export default function SettingsPage() {
         <h2 className="mb-1 text-lg font-bold">Practice</h2>
         <Row>
           <Toggle label="Coach speaks aloud" hint="Turn off to read the coach's messages instead." checked={settings.coachVoice} onChange={(v) => update({ coachVoice: v })} />
+        </Row>
+        <Row>
+          <Toggle
+            label="Let me interrupt the coach"
+            hint="When you start speaking, the coach stops and listens. Turn off if the coach keeps stopping by itself (use headphones to avoid this)."
+            checked={settings.bargeIn}
+            onChange={(v) => update({ bargeIn: v })}
+          />
+        </Row>
+        <Row>
+          <div className="flex flex-wrap items-center gap-3 py-3">
+            <Button variant="secondary" disabled={voiceCheck === "checking"} onClick={() => void checkVoice()}>
+              {voiceCheck === "checking" ? "Checking..." : "Test the coach's voice"}
+            </Button>
+            {voiceCheck && voiceCheck !== "checking" && (
+              <span role="status" className="text-sm text-muted">
+                {voiceCheck}
+              </span>
+            )}
+          </div>
         </Row>
         <Row>
           <div className="py-3">

@@ -7,7 +7,7 @@ import { findModule } from "@/features/content/modules";
 import type { CoachTurnRequest } from "@/features/session/types";
 
 function request(moduleId: string, answers: number): CoachTurnRequest {
-  const m = findModule("engineering", "intermediate", "interview")!;
+  const m = findModule("engineering", "intermediate", "interview", "13to17")!;
   const history: CoachTurnRequest["history"] = [{ role: "coach", text: m.openingQuestion }];
   for (let i = 0; i < answers; i++) {
     history.push({ role: "student", text: `This is my answer number ${i + 1}, and it has enough words to count as a real answer.` });
@@ -30,7 +30,7 @@ describe("questions go from easy to difficult", () => {
   });
 
   it("asks the module's questions in order in development mode", () => {
-    const m = findModule("science", "beginner", "fluency")!;
+    const m = findModule("science", "beginner", "fluency", "13to17")!;
     expect(openingMessage(m.id, "Sam")).toContain(m.openingQuestion);
     for (let answers = 1; answers <= m.followUpQuestions.length; answers++) {
       const history: CoachTurnRequest["history"] = [{ role: "coach", text: m.openingQuestion }];
@@ -45,43 +45,52 @@ describe("questions go from easy to difficult", () => {
   });
 
   it("closes the conversation after the last question", () => {
-    const m = findModule("science", "beginner", "fluency")!;
+    const m = findModule("science", "beginner", "fluency", "13to17")!;
     const history: CoachTurnRequest["history"] = [];
     for (let i = 0; i <= m.followUpQuestions.length; i++) history.push({ role: "student", text: "I think this matters because it is part of everyday life." });
     const reply = devCoachReply({ moduleId: m.id, goal: m.goal, level: m.level, ageBand: "18plus", remainingSec: 900, event: "answer", history });
     expect(reply.wrapUp).toBe(true);
   });
 
-  it("tells the AI coach which difficulty to ask next", () => {
-    const m = findModule("engineering", "intermediate", "interview")!;
+  it("tells the AI coach which question is next, and how difficult it must be", () => {
+    const m = findModule("engineering", "intermediate", "interview", "13to17")!;
     const early = coachSystemPrompt(m, request(m.id, 1), false);
     const middle = coachSystemPrompt(m, request(m.id, 4), false);
     const late = coachSystemPrompt(m, request(m.id, 6), false);
-    expect(early).toContain("question number 2");
-    expect(early).toContain("must be EASY");
-    expect(middle).toContain("question number 5");
-    expect(middle).toContain("must be MEDIUM");
-    expect(late).toContain("question number 7");
-    expect(late).toContain("must be HARD");
+    expect(early).toContain("question 2 of 7");
+    expect(early).toContain("EASY:");
+    expect(early).toContain(`The NEXT question in the plan: "${m.followUpQuestions[0]}"`);
+    expect(middle).toContain("question 5 of 7");
+    expect(middle).toContain("MEDIUM:");
+    expect(late).toContain("question 7 of 7");
+    expect(late).toContain("HARD:");
   });
 
-  it("gives the AI coach the module's easy, medium and hard questions", () => {
-    const m = findModule("engineering", "intermediate", "interview")!;
+  it("gives the AI coach all seven questions in order, and follows the place the app sends", () => {
+    const m = findModule("engineering", "intermediate", "interview", "13to17")!;
     const prompt = coachSystemPrompt(m, request(m.id, 1), false);
-    expect(prompt).toContain(`Easy: ${m.openingQuestion} | ${m.followUpQuestions[0]} | ${m.followUpQuestions[1]}`);
-    expect(prompt).toContain(`Medium: ${m.followUpQuestions[2]} | ${m.followUpQuestions[3]}`);
-    expect(prompt).toContain(`Hard: ${m.followUpQuestions[4]} | ${m.followUpQuestions[5]}`);
+    const plan = [m.openingQuestion, ...m.followUpQuestions];
+    plan.forEach((q, i) => expect(prompt).toContain(`${i + 1}. ${q}`));
+    // The app's own count wins over the number of answers: a skipped question moves the plan on without an answer.
+    const skipped = coachSystemPrompt(m, { ...request(m.id, 1), ladderIndex: 3 }, false);
+    expect(skipped).toContain(`The NEXT question in the plan: "${m.followUpQuestions[2]}"`);
+  });
+
+  it("finishes the plan and asks the coach for one new, harder question", () => {
+    const m = findModule("engineering", "intermediate", "interview", "13to17")!;
+    const prompt = coachSystemPrompt(m, { ...request(m.id, 6), ladderIndex: 7 }, false);
+    expect(prompt).toMatch(/The plan is finished/);
   });
 });
 
 describe("each goal has its own questions", () => {
   it("asks different questions for different goals in the same subject and level", () => {
-    const sets = GOALS.map((g) => findModule("engineering", "intermediate", g.id)!.followUpQuestions.join("|"));
+    const sets = GOALS.map((g) => findModule("engineering", "intermediate", g.id, "13to17")!.followUpQuestions.join("|"));
     expect(new Set(sets).size).toBe(GOALS.length);
   });
 
   it("tells the AI coach the goal of the module, not of the profile", () => {
-    const m = findModule("engineering", "intermediate", "vocabulary")!;
+    const m = findModule("engineering", "intermediate", "vocabulary", "13to17")!;
     const prompt = coachSystemPrompt(m, { ...request(m.id, 1), goal: "fluency" }, false);
     expect(prompt).toContain("Use richer vocabulary");
   });

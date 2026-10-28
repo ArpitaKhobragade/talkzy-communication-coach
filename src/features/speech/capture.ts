@@ -20,6 +20,10 @@ export interface TurnCaptureOptions {
   onFatal: (reason: CaptureFatal) => void;
   /** Optional 0-1 loudness or speech probability for a level indicator. */
   onLevel?: (level: number) => void;
+  /** A short reply to "Are you done?" (yes, no, say more, end), not a part of the lesson. */
+  reply?: boolean;
+  /** An answer to a lesson question: the speech service keeps filler words ("umm", "haa") in the text, so they can be counted. */
+  verbatim?: boolean;
 }
 
 export interface TurnCaptureLike {

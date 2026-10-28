@@ -1,6 +1,7 @@
 import type { Goal } from "../content/types";
 import type { CoachingItem, ReadingResult, Report, SpeechMetrics, Turn, VisionMetrics } from "../session/types";
 import { cleanSpeech, countWords, findFillers, findRepetitions, paceLabel } from "../speech/metrics";
+import { applyWordFixes, findWordMistakes } from "../speech/word-mistakes";
 
 type Aloud = NonNullable<ReadingResult["aloud"]>;
 type Exercise = Report["fallbackExercises"][number];
@@ -298,7 +299,7 @@ export function buildSayItBetter(turns: Turn[]): SayItBetter[] {
 
   const cleanable = answers
     .map((t) => {
-      const removed = findFillers(t.text).reduce((n, f) => n + f.count, 0) + findRepetitions(t.text).length;
+      const removed = findFillers(t.text).reduce((n, f) => n + f.count, 0) + findRepetitions(t.text).length + findWordMistakes(t.text).length;
       return { t, removed };
     })
     .filter((x) => x.removed > 0)
@@ -306,12 +307,12 @@ export function buildSayItBetter(turns: Turn[]): SayItBetter[] {
     .slice(0, 2);
   for (const { t } of cleanable) {
     const said = trimTo(t.text, 220);
-    const better = cleanSpeech(said);
+    const better = applyWordFixes(cleanSpeech(said));
     if (better && better !== said) {
       out.push({
         said,
         better,
-        why: "Same idea, but without the extra words (like um, basically, or repeated words). It sounds smoother and more sure.",
+        why: "Same idea, but without the extra words (like um, basically, or repeated words) and with the wrong words put right. It sounds smoother and more sure.",
         source: "rule",
       });
     }

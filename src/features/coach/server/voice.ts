@@ -19,9 +19,23 @@ export class VoiceUpstreamError extends Error {
   constructor(
     readonly service: "sarvam" | "cartesia",
     readonly status: number,
+    /** What the service said, shortened (never contains the key). */
+    readonly detail = "",
   ) {
     super(`${service}_http_${status}`);
   }
+}
+
+/** A plain sentence about why the voice service refused, for the owner. It never includes the key. */
+export function voiceFailureHint(status: number, detail = ""): string {
+  // Cartesia says how many credits are left: "requires approximately 148 credits but you have 19 remaining".
+  const credits = /requires approximately (\d+) credits but you have (\d+) remaining/.exec(detail);
+  if (credits) return `The voice credit is used up: ${credits[2]} credits are left, and one coach message needs about ${credits[1]}. Add credit or upgrade the Cartesia plan. The browser voice is used until then.`;
+  if (status === 401 || status === 403) return "The voice service did not accept the API key. Check CARTESIA_API_KEY in the Vercel settings.";
+  if (status === 402 || status === 429) return "The voice service has run out of credit, or is too busy. Check the Cartesia plan and usage.";
+  if (status === 400 || status === 404 || status === 422) return "The voice service did not accept the voice or the model. Check CARTESIA_VOICE_ID and CARTESIA_MODEL.";
+  if (status >= 500) return "The voice service had a problem on its side. Try again later.";
+  return "The voice service did not answer in time.";
 }
 
 /**
@@ -29,14 +43,22 @@ export class VoiceUpstreamError extends Error {
  * `keyterms` (domain words from the reading) help recognition; if Sarvam rejects the optional
  * field we retry once without it.
  */
-export async function transcribeSegment(wav: ArrayBuffer, keyterms: string[]): Promise<string> {
-  const call = async (withKeyterms: boolean) => {
+export async function transcribeSegment(wav: ArrayBuffer, keyterms: string[], opts: { verbatim?: boolean } = {}): Promise<string> {
+  // Word-for-word text (with "umm" and "haa") is only offered by the saaras:v3 model in verbatim mode, which has no key terms.
+  // SARVAM_VERBATIM=off turns it off. If the service refuses it, the normal text is used instead.
+  const verbatimOn = opts.verbatim === true && process.env.SARVAM_VERBATIM?.trim().toLowerCase() !== "off";
+  const call = async (withKeyterms: boolean, verbatim = false) => {
     const form = new FormData();
     form.append("file", new Blob([wav], { type: "audio/wav" }), "speech.wav");
     form.append("language_code", process.env.SARVAM_LANGUAGE?.trim() || "en-IN");
-    const model = process.env.SARVAM_STT_MODEL?.trim();
-    if (model) form.append("model", model);
-    if (withKeyterms && keyterms.length) form.append("keyterms", JSON.stringify(keyterms.slice(0, 50).map((t) => t.slice(0, 64))));
+    if (verbatim) {
+      form.append("model", "saaras:v3");
+      form.append("mode", "verbatim");
+    } else {
+      const model = process.env.SARVAM_STT_MODEL?.trim();
+      if (model) form.append("model", model);
+      if (withKeyterms && keyterms.length) form.append("keyterms", JSON.stringify(keyterms.slice(0, 50).map((t) => t.slice(0, 64))));
+    }
     return fetch(`${sarvamBase()}/speech-to-text`, {
       method: "POST",
       headers: { "api-subscription-key": process.env.SARVAM_API_KEY ?? "" },
@@ -45,7 +67,8 @@ export async function transcribeSegment(wav: ArrayBuffer, keyterms: string[]): P
     });
   };
 
-  let res = await call(true);
+  let res = await call(true, verbatimOn);
+  if (verbatimOn && !res.ok) res = await call(true, false);
   if ((res.status === 400 || res.status === 422) && keyterms.length) res = await call(false);
   if (!res.ok) throw new VoiceUpstreamError("sarvam", res.status);
   const data = (await res.json()) as { transcript?: string };
@@ -71,6 +94,11 @@ export async function synthesizeSpeech(text: string, speed: number): Promise<Res
     }),
     signal: AbortSignal.timeout(20_000),
   });
-  if (!res.ok || !res.body) throw new VoiceUpstreamError("cartesia", res.status);
+  if (!res.ok || !res.body) {
+    // Keep a short piece of the answer in the server log (never the key) so the reason can be found in Vercel.
+    const detail = await res.text().then((t) => t.replace(/\s+/g, " ").slice(0, 200)).catch(() => "");
+    console.error(`[voice/tts] cartesia answered ${res.status}: ${detail}`);
+    throw new VoiceUpstreamError("cartesia", res.status, detail);
+  }
   return res;
 }

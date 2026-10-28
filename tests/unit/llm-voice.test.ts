@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activeProvider, generate, isLiveMode } from "@/features/coach/server/llm";
 import { synthesizeSpeech, transcribeSegment } from "@/features/coach/server/voice";
 import { POST as sttPost } from "@/app/api/voice/stt/route";
-import { POST as ttsPost } from "@/app/api/voice/tts/route";
+import { GET as ttsCheck, POST as ttsPost } from "@/app/api/voice/tts/route";
 import { GET as statusGet } from "@/app/api/status/route";
 
 // No real service is called: global fetch is replaced with a stub in every test.
@@ -126,6 +126,31 @@ describe("Sarvam speech-to-text", () => {
     expect(form.has("model")).toBe(false); // service default unless SARVAM_STT_MODEL is set
   });
 
+  it("asks for word-for-word text (with umm and haa) for a spoken answer, and falls back to the normal text if that is refused", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    fetchMock.mockResolvedValueOnce(json({ transcript: "umm a program is haa a list" }));
+    expect(await transcribeSegment(new Uint8Array(2000).buffer, ["debugging"], { verbatim: true })).toBe("umm a program is haa a list");
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(form.get("model")).toBe("saaras:v3");
+    expect(form.get("mode")).toBe("verbatim");
+    expect(form.has("keyterms")).toBe(false); // key terms are not offered with this model
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(json({ error: "no" }, 400)).mockResolvedValueOnce(json({ transcript: "a program is a list" }));
+    expect(await transcribeSegment(new Uint8Array(2000).buffer, ["debugging"], { verbatim: true })).toBe("a program is a list");
+    const second = fetchMock.mock.calls[1][1].body as FormData;
+    expect(second.has("mode")).toBe(false);
+    expect(second.get("keyterms")).toBe(JSON.stringify(["debugging"]));
+  });
+
+  it("does not ask for word-for-word text when SARVAM_VERBATIM is off", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    vi.stubEnv("SARVAM_VERBATIM", "off");
+    fetchMock.mockResolvedValue(json({ transcript: "ok" }));
+    await transcribeSegment(new Uint8Array(2000).buffer, [], { verbatim: true });
+    expect((fetchMock.mock.calls[0][1].body as FormData).has("mode")).toBe(false);
+  });
+
   it("retries once without key terms if Sarvam rejects the optional field", async () => {
     vi.stubEnv("SARVAM_API_KEY", "sv-test");
     fetchMock.mockResolvedValueOnce(json({ error: "bad keyterms" }, 422)).mockResolvedValueOnce(json({ transcript: "ok" }));
@@ -214,6 +239,52 @@ describe("POST /api/voice/tts", () => {
 
     fetchMock.mockResolvedValue(new Response("x", { status: 401 }));
     expect((await ttsPost(ttsRequest({ text: "hi" }))).status).toBe(502);
+  });
+});
+
+describe("GET /api/voice/tts?check=1 (the voice check)", () => {
+  const check = () => ttsCheck(new Request("http://localhost/api/voice/tts?check=1", { headers: { "x-forwarded-for": `10.1.0.${Math.floor(Math.random() * 250)}` } }));
+
+  it("says the voice is not set up when the key or voice ID is missing", async () => {
+    const body = await (await check()).json();
+    expect(body.ok).toBe(false);
+    expect(body.hint).toMatch(/CARTESIA_API_KEY and CARTESIA_VOICE_ID/);
+  });
+
+  it("says the voice works when Cartesia answers", async () => {
+    vi.stubEnv("CARTESIA_API_KEY", "sk");
+    vi.stubEnv("CARTESIA_VOICE_ID", "v");
+    fetchMock.mockResolvedValue(new Response(new Uint8Array([9, 9, 9]), { status: 200 }));
+    expect(await (await check()).json()).toEqual({ ok: true, hint: "The studio voice is working." });
+  });
+
+  it("says why it fails, without showing the key", async () => {
+    vi.stubEnv("CARTESIA_API_KEY", "sk-secret");
+    vi.stubEnv("CARTESIA_VOICE_ID", "v");
+    for (const [status, words] of [[401, /did not accept the API key/], [402, /run out of credit/], [404, /voice or the model/], [500, /problem on its side/]] as const) {
+      fetchMock.mockResolvedValue(new Response("nope", { status }));
+      const body = await (await check()).json();
+      expect(body.ok).toBe(false);
+      expect(body.hint).toMatch(words);
+      expect(JSON.stringify(body)).not.toContain("sk-secret");
+    }
+  });
+
+  it("says how many credits are left when Cartesia says the plan is used up", async () => {
+    vi.stubEnv("CARTESIA_API_KEY", "sk-secret");
+    vi.stubEnv("CARTESIA_VOICE_ID", "v");
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error_code: "quota_exceeded", message: "This request requires approximately 148 credits but you have 19 remaining. Please upgrade." }), { status: 402 }),
+    );
+    const body = await (await check()).json();
+    expect(body.ok).toBe(false);
+    expect(body.hint).toMatch(/19 credits are left/);
+    expect(body.hint).toMatch(/about 148/);
+    expect(JSON.stringify(body)).not.toContain("sk-secret");
+  });
+
+  it("only answers ?check=1", async () => {
+    expect((await ttsCheck(new Request("http://localhost/api/voice/tts"))).status).toBe(400);
   });
 });
 

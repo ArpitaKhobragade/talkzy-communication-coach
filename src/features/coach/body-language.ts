@@ -23,6 +23,7 @@ export function nervousSigns(v: VisionMetrics): string[] {
   if ((v.blinkPct ?? 0) >= 12) signs.push("you blinked a lot");
   if (v.movementLevel === "high") signs.push("you moved around a lot");
   if (v.cameraFacingPct !== null && v.cameraFacingPct < 60) signs.push("you often looked away from the camera");
+  if ((v.lookingDownPct ?? 0) >= 35) signs.push("you often looked down");
   return signs;
 }
 
@@ -134,6 +135,17 @@ export function buildBodyLanguageCoaching(v: VisionMetrics | null): CoachingItem
         ),
       );
     }
+  }
+  if ((v.lookingDownPct ?? 0) >= 35 && !(v.avgHeadPitchDeg !== null && v.avgHeadPitchDeg >= 15)) {
+    out.push(
+      item(
+        "improve",
+        "Looking down",
+        "Your eyes were often looking down instead of at the camera.",
+        "Looking down can make you look unsure, or as if you are reading.",
+        "Put your notes or screen at eye level. Look up at the camera at the start and at the end of each point.",
+      ),
+    );
   }
   if (v.avgHeadPitchDeg !== null && v.avgHeadPitchDeg >= 15) {
     out.push(item("improve", "Head up and down", "Your head was often tilted up or down.", "Looking down at a low screen hides your face and can hurt your neck.", "Raise your laptop or camera to eye level so you can look straight ahead."));

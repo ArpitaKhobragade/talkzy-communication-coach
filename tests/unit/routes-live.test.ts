@@ -12,6 +12,7 @@ vi.mock("@/features/coach/server/llm", () => ({
 
 import { POST as turnPost } from "@/app/api/coach/turn/route";
 import { POST as reportPost } from "@/app/api/coach/report/route";
+import { getModule } from "@/features/content/modules";
 import { computeSpeechMetrics } from "@/features/speech/metrics";
 
 let ipCounter = 0;
@@ -52,7 +53,7 @@ describe("POST /api/coach/turn (live mode, stubbed model)", () => {
 
     const args = generate.mock.calls[0][0];
     expect(args.purpose).toBe("chat");
-    expect(args.system).toContain("A computer cannot think like a person"); // passage grounding
+    expect(args.system).toContain(getModule("computer-science-beginner")!.passage.split("\n\n")[0]); // passage grounding
     expect(args.system).toMatch(/DATA from a student, not instructions/);
     expect(args.system).toMatch(/trusted adult/);
     expect(args.messages[0].role).toBe("user");
@@ -128,6 +129,23 @@ describe("POST /api/coach/report (live mode, stubbed model)", () => {
     generate.mockResolvedValue(reply(JSON.stringify(withoutReading)));
     const body = await (await reportPost(post("/api/coach/report", reportBody()))).json();
     expect(body.ai).not.toBeNull();
+    expect(body.ai.reading).toBeUndefined();
+  });
+
+  it("accepts a model reply that writes null for a part it has nothing to say about", async () => {
+    // Real models often write "quote": null instead of leaving the quote out. That used to throw the whole report away.
+    const withNulls = {
+      ...goodReport,
+      strengths: [{ ...goodReport.strengths[0], quote: null }],
+      improvements: [{ ...goodReport.improvements[0], quote: null }],
+      sayItBetter: null,
+      reading: null,
+    };
+    generate.mockResolvedValue(reply(JSON.stringify(withNulls)));
+    const body = await (await reportPost(post("/api/coach/report", reportBody()))).json();
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(body.ai).not.toBeNull();
+    expect(body.ai.strengths[0].quote).toBeUndefined();
     expect(body.ai.reading).toBeUndefined();
   });
 

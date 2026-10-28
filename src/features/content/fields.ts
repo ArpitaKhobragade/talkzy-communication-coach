@@ -101,3 +101,18 @@ export function getGoal(id: Goal) {
   if (!g) throw new Error(`Unknown goal: ${id}`);
   return g;
 }
+
+/** What the profile shows when the student has not chosen yet. */
+export const NOT_SURE_NAME = "Not sure yet";
+
+export function fieldChoiceName(id: FieldId | "unsure"): string {
+  return id === "unsure" ? NOT_SURE_NAME : getField(id).name;
+}
+
+export function levelChoiceName(id: Level | "unsure"): string {
+  return id === "unsure" ? NOT_SURE_NAME : (LEVELS.find((l) => l.id === id)?.name ?? id);
+}
+
+export function goalChoiceName(id: Goal | "unsure"): string {
+  return id === "unsure" ? NOT_SURE_NAME : getGoal(id).name;
+}

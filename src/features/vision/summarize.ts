@@ -14,8 +14,27 @@ export interface FrameSample {
   bodyMotion?: number;
   /** Mean absolute change in facial feature activations since the previous frame. */
   faceMotion?: number;
-  /** What the face looked like in this frame, from the face model's expression scores. */
+  /** What the face looked like in this frame, already decided (used when no raw scores are given). */
   look?: FaceLook;
+  /** The face model's expression scores for this frame. They are smoothed and adjusted for the person's resting face when the session is summarised. */
+  scores?: FaceScores;
+}
+
+/** The expression scores the report uses, each 0 to 1 (left and right sides averaged). */
+export interface FaceScores {
+  smile: number;
+  browDown: number;
+  mouthFrown: number;
+  mouthPress: number;
+  browInnerUp: number;
+  eyeWide: number;
+  blink: number;
+  /** How different the two eyes are, so a wink is high and a normal blink is low. */
+  wink: number;
+  cheekPuff: number;
+  tongueOut: number;
+  /** Eyes looking down. */
+  lookDown: number;
 }
 
 /** What one face looked like in one frame. These describe the face's shape, not a feeling. */
@@ -32,7 +51,7 @@ export interface FaceLook {
 }
 
 /** Limits on the face model's 0 to 1 expression scores (documented in docs/ARCHITECTURE.md). */
-export const LOOK_LIMITS = { smile: 0.35, browDown: 0.4, mouthFrown: 0.35, mouthPress: 0.5, browInnerUp: 0.4, eyeWide: 0.4, blink: 0.5, wink: 0.5, cheekPuff: 0.4, tongueOut: 0.3 };
+export const LOOK_LIMITS = { smile: 0.35, browDown: 0.4, mouthFrown: 0.35, mouthPress: 0.5, browInnerUp: 0.4, eyeWide: 0.4, blink: 0.5, wink: 0.5, cheekPuff: 0.4, tongueOut: 0.3, lookDown: 0.4 };
 
 /** Heuristic limits (documented in docs/ARCHITECTURE.md). They describe geometry, not feelings. */
 export const FACING_LIMIT_DEG = 25;
@@ -83,6 +102,69 @@ export function faceLookFromScores(scores: Record<string, number>): FaceLook {
   };
 }
 
+/** Picks the scores the report uses out of the face model's named expression scores. */
+export function faceScoresFrom(raw: Record<string, number>): FaceScores {
+  const g = (name: string) => raw[name] ?? 0;
+  const both = (name: string) => (g(`${name}Left`) + g(`${name}Right`)) / 2;
+  return {
+    smile: both("mouthSmile"),
+    browDown: both("browDown"),
+    mouthFrown: both("mouthFrown"),
+    mouthPress: both("mouthPress"),
+    browInnerUp: g("browInnerUp"),
+    eyeWide: both("eyeWide"),
+    blink: both("eyeBlink"),
+    wink: Math.abs(g("eyeBlinkLeft") - g("eyeBlinkRight")),
+    cheekPuff: g("cheekPuff"),
+    tongueOut: g("tongueOut"),
+    lookDown: both("eyeLookDown"),
+  };
+}
+
+/** Middle value of each small window, so one odd frame does not count as a look. */
+function median3(xs: number[]): number[] {
+  return xs.map((_, i) => {
+    const w = [xs[Math.max(0, i - 1)], xs[i], xs[Math.min(xs.length - 1, i + 1)]].sort((a, b) => a - b);
+    return w[1];
+  });
+}
+
+/**
+ * Takes away the person's resting face. Some faces have slightly lowered brows or a slight smile all the
+ * time, which is not an expression. The quietest fifth of the session is the resting level, and only a
+ * limited amount is taken off so a person who really is tense all the way through is still noticed.
+ */
+function adjustForRestingFace(xs: number[], cap: number): number[] {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const resting = Math.min(sorted[Math.floor(sorted.length * 0.2)] ?? 0, cap);
+  return xs.map((x) => Math.max(0, x - resting));
+}
+
+/** Decides, for each frame, how the face looked, using the whole session to smooth and to find the resting face. */
+export function looksFromScores(scores: FaceScores[]): { looks: FaceLook[]; lookDown: boolean[] } {
+  const L = LOOK_LIMITS;
+  const series = (pick: (s: FaceScores) => number, cap: number) => adjustForRestingFace(median3(scores.map(pick)), cap);
+  const smile = series((s) => s.smile, 0.15);
+  const browDown = series((s) => s.browDown, 0.2);
+  const mouthFrown = series((s) => s.mouthFrown, 0.2);
+  const mouthPress = series((s) => s.mouthPress, 0.2);
+  const browInnerUp = series((s) => s.browInnerUp, 0.2);
+  const eyeWide = series((s) => s.eyeWide, 0.2);
+  const lookDown = median3(scores.map((s) => s.lookDown));
+  // A wink, puffed cheeks or a tongue out must last two frames in a row to count.
+  const oddRaw = scores.map((s) => s.wink >= L.wink || s.cheekPuff >= L.cheekPuff || s.tongueOut >= L.tongueOut);
+  return {
+    looks: scores.map((s, i) => ({
+      smile: smile[i] >= L.smile,
+      tense: browDown[i] >= L.browDown || mouthFrown[i] >= L.mouthFrown || mouthPress[i] >= L.mouthPress,
+      worried: browInnerUp[i] >= L.browInnerUp || eyeWide[i] >= L.eyeWide,
+      blink: s.blink >= L.blink,
+      odd: oddRaw[i] && (oddRaw[i - 1] || oddRaw[i + 1] || false),
+    })),
+    lookDown: lookDown.map((x) => x >= LOOK_LIMITS.lookDown),
+  };
+}
+
 export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
   const n = frames.length;
   const faceFrames = frames.filter((f) => f.face);
@@ -107,8 +189,12 @@ export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
   const first = frames[0]?.t ?? 0;
   const last = frames[n - 1]?.t ?? 0;
 
-  const looks = faceFrames.map((f) => f.look).filter((l): l is FaceLook => !!l);
+  // Raw expression scores are smoothed and adjusted for the person's resting face. Frames with a ready-made look are used as they are.
+  const scored = faceFrames.filter((f): f is FrameSample & { scores: FaceScores } => !!f.scores);
+  const fromScores = scored.length >= 10 ? looksFromScores(scored.map((f) => f.scores)) : null;
+  const looks: FaceLook[] = fromScores ? fromScores.looks : faceFrames.map((f) => f.look).filter((l): l is FaceLook => !!l);
   const lookPct = (key: keyof FaceLook) => (looks.length >= 10 ? pct(looks.filter((l) => l[key]).length, looks.length) : null);
+  const lookingDownPct = fromScores ? pct(fromScores.lookDown.filter(Boolean).length, fromScores.lookDown.length) : null;
 
   return {
     framesAnalyzed: n,
@@ -130,5 +216,6 @@ export function summarizeFrames(frames: FrameSample[]): VisionMetrics {
     worriedPct: lookPct("worried"),
     blinkPct: lookPct("blink"),
     oddFacePct: lookPct("odd"),
+    lookingDownPct,
   };
 }

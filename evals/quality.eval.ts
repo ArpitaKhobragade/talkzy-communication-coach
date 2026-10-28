@@ -193,8 +193,10 @@ async function evalReportRun(b: BuiltScenario, run: number): Promise<ReportRun> 
   const quick = buildQuickReport(session);
   const shortText = [
     quick.headline,
-    ...quick.good.map((g) => `${g.area}: ${g.text}`),
-    ...quick.fix.map((f) => `${f.area}: ${f.problem}${f.how ? ` Try this: ${f.how}` : ""}`),
+    ...quick.reading.skipped.map((p) => `Reading: you skipped "${p}"`),
+    ...quick.reading.pronunciation.map((w) => `Reading: ${w.word}${w.heard ? ` sounded like ${w.heard}` : ""}. ${w.tip}`),
+    ...quick.good.map((g) => g.text),
+    ...quick.fix.map((f) => `${f.problem}${f.how ? ` Try this: ${f.how}` : ""}`),
     quick.sayItBetter ? `Say it like this: ${quick.sayItBetter.better}` : "",
   ]
     .filter(Boolean)

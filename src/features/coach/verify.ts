@@ -69,6 +69,19 @@ export function verifyFeedback(
 }
 
 /** Pull the first balanced JSON object out of model output (tolerates code fences / prose). */
+/**
+ * Some models write `null` for a part they have nothing to say about (for example `"quote": null`), where
+ * this app expects the part to be missing. Taking the nulls out lets a good reply through instead of
+ * throwing the whole written feedback away.
+ */
+export function dropNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.filter((v) => v !== null).map(dropNulls);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)]));
+  }
+  return value;
+}
+
 export function extractJson(text: string): unknown {
   const start = text.indexOf("{");
   if (start === -1) throw new Error("No JSON object in model output");

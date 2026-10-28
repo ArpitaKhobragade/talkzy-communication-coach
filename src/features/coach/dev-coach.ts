@@ -14,7 +14,7 @@ export function openingMessage(moduleId: string, displayName: string): string {
   const m = getModule(moduleId);
   const name = displayName.trim().split(/\s+/)[0] || "there";
   const question = m?.openingQuestion ?? "What was the most interesting idea in the passage, and why?";
-  return `Hi ${name}! Thanks for reading that. I'm your Talkzy coach, so take your time and speak naturally. ${question}`;
+  return `Hi ${name}! Thanks for reading that. Take your time. ${question}`;
 }
 
 const ACKS = [
@@ -51,11 +51,11 @@ export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
     return { mode: "dev", wrapUp: false, text: "Sorry, I didn't catch that clearly. Could you say it again, a little slower?" };
   }
 
-  // The module's follow-up questions, from easy to difficult.
-  const questions = m?.followUpQuestions ?? [];
-  const nextIndex = studentTurns.length - 1;
-  const outOfQuestions = nextIndex >= questions.length;
-  const closing = req.remainingSec < 45 || outOfQuestions;
+  // The module's seven questions, from easy to difficult. `ladderIndex` is the place of the next one.
+  const plan = m ? [m.openingQuestion, ...m.followUpQuestions] : [];
+  const at = req.ladderIndex ?? studentTurns.length;
+  const outOfQuestions = at >= plan.length;
+  const closing = req.remainingSec < 45 || (outOfQuestions && req.event !== "ask");
 
   if (closing) {
     return {
@@ -65,9 +65,17 @@ export function devCoachReply(req: CoachTurnRequest): CoachTurnResponse {
     };
   }
 
+  // The student asked something: this practice coach cannot answer it, and says so, then asks the open question again.
+  if (req.event === "ask") {
+    const open = plan[Math.max(0, Math.min(at - 1, plan.length - 1))] ?? "";
+    return { mode: "dev", wrapUp: false, text: `That is a good question. In this practice mode I can only ask the lesson questions, so please ask your teacher or search for it later. Let us go back to our lesson. ${open}`.trim() };
+  }
+
+  if (req.event === "skip") return { mode: "dev", wrapUp: false, text: `That is fine, let us move on. ${plan[at]}` };
+
   const lastAnswer = studentTurns[studentTurns.length - 1]?.text ?? "";
-  const ack = ACKS[(studentTurns.length - 1) % ACKS.length];
+  const ack = ACKS[Math.max(0, studentTurns.length - 1) % ACKS.length];
   const short = countWords(lastAnswer) < 8;
   const prefix = short ? `${ack} ${LONGER_NUDGE}` : ack;
-  return { mode: "dev", wrapUp: false, text: `${prefix} ${questions[nextIndex]}` };
+  return { mode: "dev", wrapUp: false, text: `${prefix} ${plan[at]}` };
 }

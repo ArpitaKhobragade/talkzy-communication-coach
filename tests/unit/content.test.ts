@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { answerHintsFor, ALL_ANSWER_HINTS } from "@/features/content/hints";
 import { FIELDS, GOALS, LEVELS } from "@/features/content/fields";
 import { MODULES, findModule, getModule, modulesFor } from "@/features/content/modules";
+import type { AgeGroup } from "@/features/content/types";
 import { countWords } from "@/features/speech/metrics";
+
+const AGES: AgeGroup[] = ["under13", "13to17", "18plus"];
 
 const WORDS: Record<string, [number, number]> = {
   beginner: [60, 160],
@@ -10,36 +14,54 @@ const WORDS: Record<string, [number, number]> = {
 };
 
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+/** First names the old story-style modules used for made-up people. The new modules have no named characters. */
+const CHARACTER_NAMES = /\b(Imran|Sunil|Riya|Asha|Rohan|Meera|Arjun|Priya|Kabir|Anita|Ravi|Neha|Karan|Divya|Aman|Sana|Farhan|Isha|Nikhil|Pooja|Rahul|Ananya|Vikram|Tara|Zoya|Dev|Maya|Kiran|Ritu|Sameer|Mira|Ali|Omar|Leela|Gopal|Hari|Lata|Raj|Sita|Amit|Anil|Bhavna|Deepak|Esha|Gauri|Harsh|Jaya|Kavya|Lakshmi|Manoj|Nandini|Om|Pankaj|Radha|Seema|Tanvi|Uma|Varun|Yash)\b/;
 
 describe("module library", () => {
-  it("has one module for every subject, level and goal", () => {
-    expect(MODULES).toHaveLength(FIELDS.length * LEVELS.length * GOALS.length);
+  it("has one module for every subject, level, goal and age group", () => {
+    expect(MODULES).toHaveLength(FIELDS.length * LEVELS.length * GOALS.length * AGES.length);
     const ids = MODULES.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("gives each goal its own passage, so no two modules share a passage", () => {
+  it("has hints only for modules that exist, and one set for every module", () => {
+    expect(Object.keys(ALL_ANSWER_HINTS).sort()).toEqual(MODULES.map((m) => m.id).sort());
+  });
+
+  it("gives each module its own passage, so no two modules share a passage", () => {
     const passages = MODULES.map((m) => m.passage);
     expect(new Set(passages).size).toBe(passages.length);
   });
 
-  it("shows a student the modules for their subject and goal at every level", () => {
+  it("shows a student the modules for their subject, goal and age group at every level", () => {
     for (const f of FIELDS)
-      for (const g of GOALS) {
-        const list = modulesFor(f.id, g.id);
-        expect(list.map((m) => m.level).sort()).toEqual(["advanced", "beginner", "intermediate"]);
-      }
+      for (const g of GOALS)
+        for (const a of AGES) {
+          const list = modulesFor(f.id, g.id, a);
+          expect(list.map((m) => m.level).sort(), `${f.id} ${g.id} ${a}`).toEqual(["advanced", "beginner", "intermediate"]);
+          expect(list.every((m) => m.age === a)).toBe(true);
+        }
   });
 
-  it("still opens sessions saved with the old subject-and-level id", () => {
+  it("gives a different set of modules to each age group", () => {
+    const kids = modulesFor("science", "clarity", "under13").map((m) => m.title);
+    const teens = modulesFor("science", "clarity", "13to17").map((m) => m.title);
+    const adults = modulesFor("science", "clarity", "18plus").map((m) => m.title);
+    expect(new Set([...kids, ...teens, ...adults]).size).toBe(9);
+  });
+
+  it("still opens sessions saved with the old ids (subject and level, or subject, level and goal)", () => {
     const old = getModule("engineering-beginner");
     expect(old?.field).toBe("engineering");
     expect(old?.level).toBe("beginner");
     expect(old?.goal).toBe("clarity");
+    expect(old?.age).toBe("13to17");
+    expect(getModule("science-advanced-interview")?.id).toBe("science-advanced-interview-13to17");
   });
 
-  it("finds a module by subject, level and goal", () => {
-    expect(findModule("science", "advanced", "interview")?.id).toBe("science-advanced-interview");
+  it("finds a module by subject, level, goal and age group", () => {
+    expect(findModule("science", "advanced", "interview", "18plus")?.id).toBe("science-advanced-interview-18plus");
+    expect(findModule("science", "advanced", "interview", "under13")?.id).toBe("science-advanced-interview-under13");
   });
 });
 
@@ -47,14 +69,14 @@ for (const f of FIELDS) {
   describe(`content: ${f.id}`, () => {
     const list = MODULES.filter((m) => m.field === f.id);
 
-    it("has 15 modules (3 levels x 5 goals)", () => {
-      expect(list).toHaveLength(15);
+    it("has 45 modules (3 age groups x 3 levels x 5 goals)", () => {
+      expect(list).toHaveLength(45);
     });
 
     for (const m of list) {
       describe(m.id, () => {
         it("has a matching id, a title and a short summary", () => {
-          expect(m.id).toBe(`${m.field}-${m.level}-${m.goal}`);
+          expect(m.id).toBe(`${m.field}-${m.level}-${m.goal}-${m.age}`);
           expect(words(m.title)).toBeGreaterThanOrEqual(2);
           expect(words(m.title)).toBeLessThanOrEqual(9);
           expect(words(m.summary)).toBeGreaterThanOrEqual(6);
@@ -84,6 +106,16 @@ for (const f of FIELDS) {
           for (const q of all) {
             expect(words(q)).toBeLessThanOrEqual(34);
             expect(q).toMatch(/[?.]$/);
+          }
+        });
+
+        it("has no named characters and seven answer hints, one for each question", () => {
+          expect(m.passage + m.title, "a made-up character in the passage").not.toMatch(CHARACTER_NAMES);
+          const hints = answerHintsFor(m.id);
+          expect(hints, "answerHints").toHaveLength(7);
+          for (const h of hints ?? []) {
+            expect(words(h), `hint length: ${h}`).toBeGreaterThanOrEqual(8);
+            expect(words(h), `hint length: ${h}`).toBeLessThanOrEqual(40);
           }
         });
 

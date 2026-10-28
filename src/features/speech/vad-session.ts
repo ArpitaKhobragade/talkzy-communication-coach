@@ -7,6 +7,16 @@ import type { MicVAD } from "@ricky0123/vad-web";
 export const REDEMPTION_MS = 1000;
 const CREATE_TIMEOUT_MS = 25_000;
 
+const VAD_FILES = ["silero_vad_v5.onnx", "ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs", "vad.worklet.bundle.min.js"];
+let prefetched = false;
+
+/** Downloads the voice detector's files while the student is still on the set-up screen, so starting is quick. */
+export function prefetchVadAssets(): void {
+  if (prefetched || typeof window === "undefined") return;
+  prefetched = true;
+  for (const f of VAD_FILES) void fetch(`/vad/${f}`).catch(() => undefined);
+}
+
 export interface VadSegment {
   /** 16 kHz mono samples between -1 and 1. */
   audio: Float32Array;
@@ -28,6 +38,7 @@ export class VadSession {
   private listener: VadListener | null = null;
   private speechStartedAt: number | null = null;
   private flushing = false;
+  private running = false;
 
   private constructor(private readonly vad: MicVAD) {}
 
@@ -86,15 +97,24 @@ export class VadSession {
     this.listener = listener;
   }
 
+  /** Starts listening. If it is already listening (for example to hear an interruption), speech in progress is kept. */
   async start(): Promise<void> {
     this.flushing = false;
+    if (this.running) return;
     this.speechStartedAt = null;
+    this.running = true;
     await this.vad.start();
+  }
+
+  /** True while the student is speaking right now. */
+  get isSpeaking(): boolean {
+    return this.speechStartedAt !== null;
   }
 
   /** Stop listening. Speech in progress is flushed as a final segment first. */
   async pause(): Promise<void> {
     this.flushing = true;
+    this.running = false;
     await this.vad.pause();
   }
 

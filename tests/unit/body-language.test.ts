@@ -128,3 +128,54 @@ describe("buildBodyLanguageCoaching: how you looked", () => {
     expect(t.indexOf("You looked nervous")).toBeLessThan(t.indexOf("Your face in the picture"));
   });
 });
+
+describe("the face over a whole session: smoothing and the resting face", () => {
+  const frames = (n: number, scores: (i: number) => Partial<NonNullable<FrameSample["scores"]>>): FrameSample[] =>
+    Array.from({ length: n }, (_, i) => ({
+      t: i * 250,
+      face: true,
+      yawDeg: 5,
+      pitchDeg: 5,
+      scores: { smile: 0, browDown: 0, mouthFrown: 0, mouthPress: 0, browInnerUp: 0, eyeWide: 0, blink: 0, wink: 0, cheekPuff: 0, tongueOut: 0, lookDown: 0, ...scores(i) },
+    }));
+
+  it("does not call a resting face with slightly lowered brows tense", () => {
+    // Brows sit a little low all the time (0.3), which is just how this face is.
+    const v = summarizeFrames(frames(60, () => ({ browDown: 0.3 })));
+    expect(v.tensePct).toBe(0);
+  });
+
+  it("does call a face tense when the brows are pulled down hard for a long time", () => {
+    const v = summarizeFrames(frames(60, (i) => ({ browDown: i < 30 ? 0.05 : 0.8 })));
+    expect(v.tensePct).toBeGreaterThanOrEqual(45);
+  });
+
+  it("ignores a single odd frame (a blip)", () => {
+    const v = summarizeFrames(frames(60, (i) => ({ browDown: i === 20 ? 0.9 : 0.02 })));
+    expect(v.tensePct).toBe(0);
+  });
+
+  it("counts a wink only when it lasts at least two frames", () => {
+    expect(summarizeFrames(frames(40, (i) => ({ wink: i === 10 ? 0.9 : 0 }))).oddFacePct).toBe(0);
+    expect(summarizeFrames(frames(40, (i) => ({ wink: i === 10 || i === 11 ? 0.9 : 0 }))).oddFacePct).toBeGreaterThan(0);
+  });
+
+  it("measures how often the eyes were looking down", () => {
+    const v = summarizeFrames(frames(40, (i) => ({ lookDown: i < 24 ? 0.7 : 0.05 })));
+    expect(v.lookingDownPct).toBeGreaterThanOrEqual(55);
+  });
+
+  it("a nervous session is described as nervous, with looking down as one of the reasons", () => {
+    const v = summarizeFrames(frames(80, (i) => ({ browInnerUp: 0.6, lookDown: 0.7, blink: i % 3 === 0 ? 0.9 : 0 })));
+    const items = buildBodyLanguageCoaching(v);
+    const nervous = items.find((x) => x.topic === "You looked nervous");
+    expect(nervous?.observation).toMatch(/looked down/);
+    expect(nervous?.observation).toMatch(/blinked a lot/);
+    expect(items.some((x) => x.topic === "Looking down")).toBe(true);
+  });
+
+  it("a calm session with smiles is described as relaxed", () => {
+    const v = summarizeFrames(frames(80, (i) => ({ smile: i % 8 < 4 ? 0.7 : 0.1 })));
+    expect(buildBodyLanguageCoaching(v).find((x) => x.topic === "How you looked")?.observation).toMatch(/relaxed and friendly/);
+  });
+});

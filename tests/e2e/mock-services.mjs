@@ -65,6 +65,7 @@ createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/__mode") {
     const body = JSON.parse((await readBody(req)).toString() || "{}");
     if (body.stt) state.sttMode = body.stt;
+    if (typeof body.sttCalls === "number") state.sttCalls = body.sttCalls;
     return json(res, 200, state);
   }
   if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true });
@@ -81,6 +82,8 @@ createServer(async (req, res) => {
       keyterms: /name="keyterms"\r\n\r\n([^\r]+)/.exec(text)?.[1],
     });
     if (state.sttMode === "fail") return json(res, 500, { error: { message: "mock failure" } });
+    // A short reply to "Are you done?" (the app sends the command words as hints): the student says yes.
+    if ((log.stt.at(-1)?.keyterms ?? "").includes("move on")) return json(res, 200, { request_id: "mock", transcript: "Yes, move on.", language_code: "en-IN" });
     // A slow speech service: the accurate transcript only arrives some seconds after the student stops.
     if (state.sttMode === "slow") await new Promise((r) => setTimeout(r, 7000));
     const transcript = TRANSCRIPTS[state.sttCalls++ % TRANSCRIPTS.length];

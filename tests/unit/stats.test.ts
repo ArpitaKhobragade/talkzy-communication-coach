@@ -79,7 +79,7 @@ describe("trendSeries", () => {
 describe("recommendNext", () => {
   it("starts from the profile with no history", () => {
     const r = recommendNext(profile, []);
-    expect(r.module.id).toBe("computer-science-beginner-confidence");
+    expect(r.module.id).toBe(`computer-science-beginner-confidence-${profile.ageBand}`);
     expect(r.goal).toBe("confidence");
   });
 

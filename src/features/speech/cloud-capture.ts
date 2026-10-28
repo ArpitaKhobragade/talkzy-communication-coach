@@ -14,12 +14,17 @@ const STT_TIMEOUT_MS = 20_000;
 const END_WAIT_MS = 15_000;
 /** Two failed segments in a row means cloud recognition is not working right now. */
 const MAX_CONSECUTIVE_FAILURES = 2;
+/**
+ * Failed segments in a row, counted across turns: a new capture starts for every question, so a count kept
+ * inside one capture would start again at zero after each "say that again" and trouble would never be reported.
+ */
+let failureStreak = 0;
 
-async function transcribe(audio: Float32Array, moduleId: string): Promise<string> {
+async function transcribe(audio: Float32Array, moduleId: string, reply: boolean, verbatim: boolean): Promise<string> {
   const texts: string[] = [];
   for (const piece of splitForStt(audio)) {
     if (piece.length < MIN_PIECE_SAMPLES) continue;
-    const res = await fetch(`/api/voice/stt?module=${encodeURIComponent(moduleId)}`, {
+    const res = await fetch(`/api/voice/stt?module=${encodeURIComponent(moduleId)}${reply ? "&reply=1" : ""}${verbatim ? "&answer=1" : ""}`, {
       method: "POST",
       headers: { "content-type": "audio/wav" },
       body: encodeWav16(piece),
@@ -61,13 +66,16 @@ export class CloudTurnCapture implements TurnCaptureLike {
     this.parts = [];
     this.pending = 0;
     this.speaking = false;
-    this.failures = 0;
+    // Failures are not reset here: if the speech service failed on the last turn, one more failure is enough to say so.
+    // A successful transcription resets the count.
     this.fatalRaised = false;
     this.liveFinals = [];
     this.liveInterim = "";
     this.active = true;
     this.turnStart = performance.now();
     this.lastActivity = this.turnStart;
+    // The student may already be talking (they interrupted the coach), so their words are kept from the start.
+    this.speaking = this.vad.isSpeaking;
 
     this.vad.setListener({
       onSpeechStart: () => {
@@ -115,15 +123,17 @@ export class CloudTurnCapture implements TurnCaptureLike {
   }
 
   /**
-   * What the student sees. While they are speaking, or while a part is still being transcribed, it is
-   * the live words. Once the transcript is ready it is Sarvam's text.
+   * What the student sees, as quickly as possible. The browser's live words appear while they are still
+   * speaking (they do not wait for the voice detector). If the accurate transcript has more words, that
+   * is shown instead. What is saved and measured is always the accurate transcript.
    */
   private displayText(): string {
     const confirmed = this.currentText();
     const live = this.liveText();
     const talking = this.speaking || this.pending > 0;
-    if (talking && live) return live;
-    if (talking) return `${confirmed} ...`.trim(); // heard, not transcribed yet
+    const count = (t: string) => (t ? t.split(/\s+/).length : 0);
+    if (live && count(live) >= count(confirmed)) return live;
+    if (talking && !live) return `${confirmed} ...`.trim(); // heard, not transcribed yet
     return confirmed || live;
   }
 
@@ -144,20 +154,23 @@ export class CloudTurnCapture implements TurnCaptureLike {
 
     const run = async () => {
       try {
-        return await transcribe(seg.audio, this.moduleId);
+        return await transcribe(seg.audio, this.moduleId, !!this.opts.reply, !!this.opts.verbatim);
       } catch {
-        return await transcribe(seg.audio, this.moduleId); // one retry for a transient failure
+        return await transcribe(seg.audio, this.moduleId, !!this.opts.reply, !!this.opts.verbatim); // one retry for a transient failure
       }
     };
     run()
       .then((text) => {
         this.parts[index] = text;
         this.failures = 0;
+        failureStreak = 0;
       })
       .catch(() => {
         this.failures++;
-        if (this.failures >= MAX_CONSECUTIVE_FAILURES && !this.fatalRaised) {
+        failureStreak++;
+        if (failureStreak >= MAX_CONSECUTIVE_FAILURES && !this.fatalRaised) {
           this.fatalRaised = true;
+          failureStreak = 0;
           this.opts.onFatal("cloud-stt");
         }
       })

@@ -12,8 +12,12 @@ export const MIN_WORDS_FOR_VARIETY = 50;
  * words and cannot be told apart from filler use without prosody.
  * Note: browser speech recognisers often drop "um"/"uh", so counts are a lower bound.
  */
-const SINGLE_FILLERS = new Set(["um", "umm", "uh", "uhh", "uhm", "er", "erm", "hmm", "hm", "ah", "basically", "actually", "literally"]);
-const PHRASE_FILLERS = ["you know", "i mean"];
+const SINGLE_FILLERS = new Set([
+  "um", "umm", "ummm", "uh", "uhh", "uhm", "er", "erm", "hmm", "hmmm", "hm", "mm", "ah", "ahh", "aa", "aah", "aaa", "ee", "eee",
+  // Sounds and words that students in India often use to fill a pause.
+  "haa", "haan", "han", "hanji", "ha", "acha", "achha", "matlab", "basically", "actually", "literally",
+]);
+const PHRASE_FILLERS = ["you know", "i mean", "kind of", "sort of", "you see"];
 
 export function tokenize(text: string): string[] {
   return (text.toLowerCase().replace(/[‘’]/g, "'").match(/[a-z0-9]+(?:'[a-z]+)?/g) ?? []).map((w) => w.replace(/'/g, ""));

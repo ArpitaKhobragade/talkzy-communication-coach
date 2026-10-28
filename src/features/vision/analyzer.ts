@@ -2,7 +2,7 @@
 // uploaded, recorded or stored; only numeric summaries survive (see summarize.ts).
 import type { FaceLandmarker, PoseLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { VisionMetrics } from "../session/types";
-import { faceLookFromScores, headPoseFromMatrix, summarizeFrames, type FrameSample } from "./summarize";
+import { faceScoresFrom, headPoseFromMatrix, summarizeFrames, type FrameSample } from "./summarize";
 
 const WASM_PATH = "/mediapipe/wasm";
 const FACE_MODEL = "/models/face_landmarker.task";
@@ -147,7 +147,7 @@ export class VisionAnalyzer {
       }
       const blend = f.faceBlendshapes?.[0]?.categories;
       if (blend) {
-        sample.look = faceLookFromScores(Object.fromEntries(blend.map((c) => [c.categoryName, c.score])));
+        sample.scores = faceScoresFrom(Object.fromEntries(blend.map((c) => [c.categoryName, c.score])));
         // Ignore blinks and eye gaze; mouth opening is dominated by speaking but is kept in the average.
         const values = blend.filter((c) => !/^eye(Blink|Look)/.test(c.categoryName)).map((c) => c.score);
         if (this.prevBlend && this.prevBlend.length === values.length) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extractJson, quoteAppears, normalizeText, verifyFeedback } from "@/features/coach/verify";
-import { buildChatMessages } from "@/features/coach/server/prompts";
+import { buildChatMessages, coachSystemPrompt } from "@/features/coach/server/prompts";
+import { answerHintsFor } from "@/features/content/hints";
 import { devCoachReply, openingMessage } from "@/features/coach/dev-coach";
 import { buildBodyLanguageNotes, buildFallbackExercises, buildSpeechNotes } from "@/features/coach/report-builder";
 import { computeSpeechMetrics } from "@/features/speech/metrics";
@@ -90,6 +91,35 @@ describe("buildChatMessages", () => {
     expect(msgs[msgs.length - 1].content).toMatch(/not said anything/);
     expect(msgs[msgs.length - 1].role).toBe("user");
   });
+
+  it("gives the coach the next question, and what a strong answer to the last one contains", () => {
+    const m = getModule("computer-science-beginner")!;
+    const hints = answerHintsFor(m.id)!;
+    const system = coachSystemPrompt(m, { ...base, ladderIndex: 2 }, false);
+    expect(system).toContain(m.followUpQuestions[1]); // question 3 of 7 is the next to ask
+    expect(system).toMatch(/question 3 of 7/);
+    expect(system).toContain(hints[1]); // what a strong answer to the question just answered contains
+    expect(system).toContain(hints[2]); // and to the next question
+  });
+
+  it("covers questions that have nothing to do with the lesson, interruptions and changes of topic", () => {
+    const system = coachSystemPrompt(getModule("computer-science-beginner")!, { ...base, event: "ask" }, false);
+    expect(system).toMatch(/ANYTHING/);
+    expect(system).toMatch(/FOLLOW THEIR LEAD/);
+    expect(system).toMatch(/interrupt/i);
+    expect(system).toMatch(/last message is a question or a request/);
+  });
+
+  it("describes the skip situation to the coach", () => {
+    const system = coachSystemPrompt(getModule("computer-science-beginner")!, { ...base, event: "skip" }, false);
+    expect(system).toMatch(/chose to skip the last question/);
+  });
+
+  it("tells the coach the student skipped the last question", () => {
+    const msgs = buildChatMessages({ ...base, event: "skip", history: [base.history[0]] });
+    expect(msgs[msgs.length - 1].content).toMatch(/skipped the last question/);
+    expect(msgs[msgs.length - 1].role).toBe("user");
+  });
 });
 
 describe("dev coach", () => {
@@ -127,6 +157,29 @@ describe("dev coach", () => {
   it("handles silence and unclear speech gracefully", () => {
     expect(devCoachReply(req({ event: "silence" })).text).toMatch(/take your time/i);
     expect(devCoachReply(req({ event: "unclear" })).text).toMatch(/say it again/i);
+  });
+
+  it("moves on to the next question when the student skips one", () => {
+    const m = getModule("computer-science-beginner")!;
+    const r = devCoachReply(req({ event: "skip", ladderIndex: 1, history: [{ role: "coach", text: "q" }] }));
+    expect(r.text).toMatch(/let us move on/i);
+    expect(r.text).toContain(m.followUpQuestions[0]);
+    // A second skip goes one question further.
+    const again = devCoachReply(req({ event: "skip", ladderIndex: 2, history: [{ role: "coach", text: "q" }] }));
+    expect(again.text).toContain(m.followUpQuestions[1]);
+  });
+
+  it("does not move the lesson on when the student asks a question; it asks the open question again", () => {
+    const m = getModule("computer-science-beginner")!;
+    const r = devCoachReply(req({ event: "ask", ladderIndex: 1, history: [{ role: "coach", text: "q" }, { role: "student", text: "What does value mean?" }] }));
+    expect(r.wrapUp).toBe(false);
+    expect(r.text).toContain(m.openingQuestion);
+  });
+
+  it("uses the question place the app sends, not the number of answers", () => {
+    const m = getModule("computer-science-beginner")!;
+    const r = devCoachReply(req({ ladderIndex: 3 }));
+    expect(r.text).toContain(m.followUpQuestions[2]);
   });
 
   it("greets by first name only", () => {
@@ -190,14 +243,14 @@ describe("rateLimit", () => {
 
 describe("content library", () => {
   it("has a module for every subject, level and goal with complete content", () => {
-    expect(MODULES).toHaveLength(FIELDS.length * 3 * 5);
+    expect(MODULES).toHaveLength(FIELDS.length * 3 * 5 * 3);
     for (const m of MODULES) {
-      expect(m.id).toBe(`${m.field}-${m.level}-${m.goal}`);
+      expect(m.id).toBe(`${m.field}-${m.level}-${m.goal}-${m.age}`);
       expect(m.passage.split(/\s+/).length).toBeGreaterThan(55);
       expect(m.followUpQuestions.length).toBe(6);
       expect(m.keyTerms.length).toBeGreaterThanOrEqual(4);
       for (const t of m.keyTerms) expect(m.passage.toLowerCase()).toContain(t.toLowerCase());
-      expect(/[^\x00-\x7F]/.test(m.passage)).toBe(false);
+      expect(/[^\x00-\x7F‘’“”]/.test(m.passage)).toBe(false); // plain letters, curly quotes allowed
     }
   });
 });

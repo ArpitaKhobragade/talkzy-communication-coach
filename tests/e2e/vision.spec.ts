@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { completeOnboarding, reportPaper, showReportAsPage } from "./helpers";
+import { completeOnboarding } from "./helpers";
 
 // Chromium's built-in fake camera (a moving test pattern, no person) lets us check that the
 // on-device MediaPipe pipeline really loads its WASM + models and runs on live video frames
@@ -20,7 +20,6 @@ test("camera analysis loads on-device models, runs, and puts the camera feedback
   const pageErrors: string[] = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
-  await showReportAsPage(page);
   await completeOnboarding(page);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
 
@@ -34,20 +33,20 @@ test("camera analysis loads on-device models, runs, and puts the camera feedback
     timeout: 60_000,
   });
   await page.waitForTimeout(6000); // let several frames be analysed
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
 
   await expect(page.getByText(/type your answers/i).first()).toBeVisible();
   await page.getByRole("button", { name: "End session" }).click();
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 60_000 });
 
-  const paper = reportPaper(page);
-  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
+  const camera = page.getByTestId("camera-box").locator("xpath=ancestor::section");
+  await expect(camera).toBeVisible();
   // The test pattern contains no person, so the report says the face was out of the picture, and how to fix it.
-  await expect(paper).toContainText(/Your face was often out of the picture/);
-  await expect(paper).toContainText(/How to fix it: Sit so your whole face stays in the picture/);
+  await expect(camera).toContainText(/Your face was often out of the picture/);
+  await expect(camera).toContainText(/How to fix it: Sit so your whole face stays in the picture/);
   // With no face to read, it does not guess how the person looked.
-  await expect(paper).not.toContainText(/nervous|angry|tense|relaxed/i);
+  await expect(camera).not.toContainText(/nervous|angry|tense|relaxed/i);
 
   expect(pageErrors).toEqual([]);
   // Nothing left the device: no external request got a response. (MediaPipe's runtime tries to

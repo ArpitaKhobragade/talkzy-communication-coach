@@ -55,9 +55,9 @@ export async function mockSpeech(page: Page, answers: string[]) {
           setTimeout(() => {
             const r = Object.assign([{ transcript: text, confidence: 0.92 }], { isFinal: true });
             this.onresult?.({ resultIndex: 0, results: { length: 1, 0: r } });
-          }, 4300),
+          }, 2600),
         );
-        this.timers.push(setTimeout(() => setSpeaking(false), 4400));
+        this.timers.push(setTimeout(() => setSpeaking(false), 2700));
       }
       stop() {
         this.timers.forEach(clearTimeout);
@@ -87,18 +87,6 @@ export async function mockSpeech(page: Page, answers: string[]) {
   }, answers);
 }
 
-/**
- * The report is a PDF shown in the page. Test browsers have no PDF viewer, so the report is drawn as a page
- * instead (the same words). Call this before opening the site, then read the page with `reportPaper`.
- */
-export async function showReportAsPage(page: Page) {
-  await page.addInitScript(() => {
-    Object.defineProperty(Navigator.prototype, "pdfViewerEnabled", { get: () => false, configurable: true });
-  });
-}
-
-export const reportPaper = (page: Page) => page.getByTestId("report-paper");
-
 export async function completeOnboarding(
   page: Page,
   opts: { name?: string; age?: RegExp; field?: RegExp; level?: RegExp; goal?: RegExp } = {},
@@ -119,8 +107,7 @@ export async function completeOnboarding(
 export async function completeTypedSession(page: Page) {
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
   await page.getByRole("button", { name: "Begin" }).click();
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
   const answers = [
     "I think the main idea is that customers choose brands they trust, and I can give an example from a shop near my home.",
     "A good example is a local bakery that remembers regular customers, which makes people come back every week.",

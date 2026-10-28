@@ -27,21 +27,36 @@ Each session has two phases and ends with a report.
   </tr>
 </table>
 
+## The reading and the conversation
+
+- **Reading starts by itself** when the microphone is ready, and **ends by itself** when the student reaches the end of the passage. There is no start or finish button (a button appears only if voice is not available, or after a long quiet time).
+- **Starting is quick:** the microphone and camera are asked for together, the reading screen opens straight away, and the voice detector loads in the background (its files are also downloaded early, while the student reads the set-up screen).
+- **Words appear as they are spoken**, straight from the browser's live recogniser.
+- **"Are you done?"** When the student stops speaking, the coach asks whether they are finished. "Yes" moves on. "I want to say more" makes the coach say it is listening; when the student stops again, the coach asks "Should we move to the next question?". Two buttons do the same. No reply for a few seconds counts as yes.
+- **Interrupting:** speaking over the coach stops the coach, who then listens (it needs the voice detector; turn it off in Settings if the speakers make the coach hear itself).
+- **"Next question":** ending an answer with "next question", "that's all" or "I'm done" moves on at once, with no "Are you done?". "Repeat the question" and "give me a hint" are done at once too.
+- **Questions and interruptions:** the student can ask the coach anything, even if it is not about the lesson. The coach answers first, in simple words, and then goes back to the practice with one question.
+- **Wait, let me think:** saying "wait", "hold on" or "let me think" makes the coach say one short line and then stay quiet for longer. The coach also waits longer when a sentence stops in the middle ("... because", "umm").
+- **Speaking over the coach:** the coach stops and listens at once. With the accurate voice detector it uses that; without it, it listens to the loudness of the microphone. It can be turned off in Settings.
+- **Any topic:** the coach follows the student's lead on any harmless topic (science, sport, careers, study advice, English words), practises speaking with them there, and offers to go back to the lesson later. It follows the module's seven questions in order and judges each answer against a note on what a strong answer contains.
+- **Ending by voice:** saying "end the session", "I want to stop" or "give me my report" ends the session at once.
+- **Coach voice:** if the studio voice (Cartesia) fails, the browser voice takes over at once and the reason is shown. **Settings, Test the coach's voice** says why the studio voice is not working (key, credit, or voice name).
+
 ## The feedback report
 
 While the report is made, a **percentage and progress bar** show how far along it is. With the AI on, it usually takes about **3 seconds**.
 
-When it reaches 100%, the report opens as a **black-and-white PDF** with one **Download PDF** button under it, and nothing else on the page. Phones and other browsers that cannot show a PDF inside a page show the same report as a page, and the button still gives the real PDF.
+When it reaches 100%, the report page opens with a header (name, module, a one-line summary and three tiles that show how each part went) and then **boxes**: **Reading**, **Conversation** and **Face and body**. The Reading box shows how much of the passage was read, a speed gauge (too slow, good, too fast), the parts that were skipped, the words to say more clearly with their word parts, and the passage itself with a green line under what was read, a red line under what was skipped and an orange line under what was not clear. In the Conversation box, each thing to fix names the question it was about. Every box says what went well, what to fix and **how to fix it**, in simple English. A **Download PDF** button gives the same report as a **one-page, black-and-white PDF**, made on the device. A link under it opens the next module to practise.
 
-The report is short and written in simple English, with no tables of numbers. It shows **what went well** (up to 2 points), **what to fix** (up to 2 points, each with the student's own words and what to try), **one "say it like this" example**, **your face and body** (if the camera was on) and **a link to the next module to practise**.
-
-**Your face and body** says how the student came across, in plain words, and how to improve: for example "You looked a little nervous: your eyebrows were raised in a worried way, you blinked a lot", "Your face looked tense" (brows pulled down or lips pressed, which can look serious or angry), unusual faces (a wink, puffed cheeks, tongue out), or "You looked relaxed and friendly". It also covers where the head and face were, posture and movement. These describe how the student **looked** to a listener, from the shape of the face and body, not what they felt.
+- **Reading:** which parts of the passage were **skipped**, where the student stopped, and each word that was **not said clearly** (the app heard a different word), with the word in parts (such as "pass-word"), what to change, and a **Hear it** button that says the word aloud. The words also change colour on the reading screen while the student reads (read, skipped, unclear).
+- **Conversation:** what was wrong, the student's own words, and how to fix it, plus one "say it like this" example.
+- **Face and body** (if the camera was on): how the student came across and how to improve, for example "You looked a little nervous: your eyebrows were raised in a worried way, you blinked a lot, you often looked down", "Your face looked tense" (brows pulled down or lips pressed, which can look serious or angry), unusual faces (a wink, puffed cheeks, tongue out), or "You looked relaxed and friendly". It also covers where the head and eyes were, posture and movement. These describe how the student **looked** to a listener, from the shape of the face and body, not what they felt. Each look must last more than a moment to count, and a person's resting face is allowed for. The limits are rough rules (`LOOK_LIMITS` in `src/features/vision/summarize.ts`) and have not been checked on many real faces.
 
 Points about the reading and the numbers (fillers, pace, how much was read) come from the measurements, so they are always true. The AI's own points are checked too: empty praise such as "you answered every question" is never shown.
 
 - **"Instead of this, say it like this"** takes sentences the student really said and shows a clearer way to say them. Every quote is checked against the transcript on the server, so the coach can never show something the student did not say.
-- The PDF is made on the device and nothing is uploaded.
-- If the AI step fails, the report still shows the measured results.
+- Nothing is uploaded: the PDF is made on the device.
+- If the AI step fails, the report still shows the reading, the measured points and the camera.
 
 <table>
   <tr>
@@ -52,7 +67,7 @@ Points about the reading and the numbers (fillers, pace, how much was read) come
 
 ## Your subject, your goal, your modules
 
-The student chooses a **subject or specialization**, a **difficulty** and **what they want to improve** once, when they start. There is a different module for every subject, difficulty and goal (**8 x 3 x 5 = 120 modules**), each with its own passage, its own kind of activity and its own questions. The **Library shows only the three that match the student's subject and goal**, with their own level first, so nothing has to be chosen again. To change any of it, open **Profile** and tap a section. Everything then updates by itself.
+The student chooses a **subject or specialization**, a **difficulty** and **what they want to improve** once, when they start. There is a different module for every subject, difficulty, goal and **age group** (**8 x 3 x 5 x 3 = 360 modules**), each with its own passage, its own kind of activity and its own questions. The age groups are **under 13**, **13 to 17** and **18 and older**: the level is about the English, and the age group changes the story, the examples and the tone (a class pet for children, school uniforms for teenagers, work from home for adults; an interview with a club leader, a school club or a campus placement). The **Library shows only the three that match the student's subject, goal and age group**, with their own level first, so nothing has to be chosen again. To change any of it, open **Profile** and tap a section. Everything then updates by itself. How the modules are written, and the rules the tests check, are in [docs/CONTENT-GUIDE.md](docs/CONTENT-GUIDE.md).
 
 The coach asks questions **from easy to difficult**: questions 1 to 3 are warm-ups, 4 and 5 need a reason or an example, and from 6 on they ask for an opinion and a defence of it. The screen shows which kind of question it is.
 
@@ -85,7 +100,7 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/s
 - **Measured:** speaking pace, pauses and thinking time, filler words, repeated words, answer length, word variety, reading accuracy.
 - **AI assessment (live mode):** grammar, vocabulary, structure and relevance, always labelled as the AI's opinion.
 - **Camera (optional, on the device only):** the look of the face (smiling, tense, worried, blinking, unusual faces), whether the face is in view, head direction, posture, hand and body movement. The video never leaves the device. The limits for each look are rough rules (see `LOOK_LIMITS` in `src/features/vision/summarize.ts`) and have not been checked on many real faces.
-- Pronunciation is **not scored**. Filler counts are a lower bound because browser recognisers often drop "um" and "uh".
+- Pronunciation is **not scored**. Spoken answers are sent to the speech service in word-for-word mode (`saaras:v3`, set with `SARVAM_VERBATIM=off` to turn it off) so that "umm" and "haa" are kept and counted. Filler counts are still a lower bound, because recognisers drop some.
 - The camera feedback says how the student **looked** (for example nervous or tense). It never claims to know what they felt, how confident they are, or whether they are honest.
 
 ## Tech
@@ -96,7 +111,7 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/s
 - **AI:** **Groq** writes the coach's replies (`openai/gpt-oss-20b`, fast) and the report (`openai/gpt-oss-120b`, more accurate). Anthropic is an optional alternative.
 - **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly. The models start loading as soon as the camera box is ticked, so they are ready when the session begins.
 - **Report files:** jsPDF, in the browser.
-- **Tests:** Vitest (785 unit tests, including checks of all 120 modules) and Playwright (25 end-to-end tests).
+- **Tests:** Vitest (5,510 unit tests, including checks of all 360 modules) and Playwright (35 end-to-end tests).
 - **AI quality check:** `npm run eval` runs made-up sessions with planted mistakes through the real AI and marks the result. See [How well does the AI feedback work?](docs/EVALUATION.md).
 
 API keys are read only by server code and never sent to the browser. A Content-Security-Policy (`connect-src 'self'`) stops the page contacting any outside server.
@@ -161,7 +176,7 @@ No accounts and no passwords: a display name only. Under-13s need a guardian's c
 docs/                     Product, architecture, design, security, decisions and test plan
 src/app/                  Pages (home, library, practice, report, progress, profile, settings, privacy) and API routes
 src/components/           UI, including the reading and conversation screens
-src/features/content/     8 subjects x 3 levels x 5 goals = 120 modules (passage, key terms, questions easy to hard)
+src/features/content/     8 subjects x 3 levels x 5 goals x 3 age groups = 360 modules (passage, key terms, questions easy to hard)
 src/features/speech/      Speech metrics, reading alignment, voice timing, recognition and synthesis
 src/features/vision/      On-device face and pose analysis
 src/features/coach/       Prompts, dev-mode coach, quote checking, rule-based coaching

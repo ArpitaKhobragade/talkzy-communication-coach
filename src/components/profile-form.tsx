@@ -2,7 +2,7 @@
 
 import { CaretDown, CheckCircle } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { FIELDS, GOALS, LEVELS, getField, getGoal } from "@/features/content/fields";
+import { FIELDS, GOALS, LEVELS, NOT_SURE_NAME, fieldChoiceName, goalChoiceName, levelChoiceName } from "@/features/content/fields";
 import { cleanName, NAME_MAX, stripName } from "@/features/session/name";
 import type { Profile } from "@/features/session/types";
 import { PrivacyExplainer } from "./privacy-explainer";
@@ -178,16 +178,18 @@ export function ProfileForm({
         {FIELDS.map((f) => (
           <Choice key={f.id} name="field" title={f.name} description={f.description} checked={field === f.id} onChange={() => setField(f.id)} />
         ))}
+        <Choice name="field" title={NOT_SURE_NAME} description="Not sure? We will show you a mix of subjects to try." checked={field === "unsure"} onChange={() => setField("unsure")} />
       </div>
     </fieldset>
   );
   const levelChoices = (
     <fieldset>
       <legend className="text-sm font-semibold">Difficulty</legend>
-      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {LEVELS.map((l) => (
           <Choice key={l.id} name="level" title={l.name} description={l.description} checked={level === l.id} onChange={() => setLevel(l.id)} />
         ))}
+        <Choice name="level" title={NOT_SURE_NAME} description="Not sure? We will start you with the easy ones." checked={level === "unsure"} onChange={() => setLevel("unsure")} />
       </div>
     </fieldset>
   );
@@ -198,6 +200,7 @@ export function ProfileForm({
         {GOALS.map((g) => (
           <Choice key={g.id} name="goal" title={g.name} description={g.description} checked={goal === g.id} onChange={() => setGoal(g.id)} />
         ))}
+        <Choice name="goal" title={NOT_SURE_NAME} description="Not sure? We will show you a module for every goal to try." checked={goal === "unsure"} onChange={() => setGoal("unsure")} />
       </div>
     </fieldset>
   );
@@ -209,13 +212,13 @@ export function ProfileForm({
           <Fold {...fold("about")} title="About you" summary={`${name.trim() || "No name yet"} · ${AGE_OPTIONS.find((o) => o.id === age)?.label ?? "Age group not chosen"}`}>
             {aboutFields}
           </Fold>
-          <Fold {...fold("subject")} title="Your subject or specialization" summary={getField(field).name}>
+          <Fold {...fold("subject")} title="Your subject or specialization" summary={fieldChoiceName(field)}>
             {fieldChoices}
           </Fold>
-          <Fold {...fold("level")} title="Difficulty" summary={LEVELS.find((l) => l.id === level)?.name ?? level}>
+          <Fold {...fold("level")} title="Difficulty" summary={levelChoiceName(level)}>
             {levelChoices}
           </Fold>
-          <Fold {...fold("goal")} title="What do you want to improve?" summary={getGoal(goal).name}>
+          <Fold {...fold("goal")} title="What do you want to improve?" summary={goalChoiceName(goal)}>
             {goalChoices}
           </Fold>
         </div>

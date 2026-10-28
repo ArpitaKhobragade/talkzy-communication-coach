@@ -12,6 +12,9 @@ export type Level = "beginner" | "intermediate" | "advanced";
 
 export type Goal = "fluency" | "clarity" | "vocabulary" | "confidence" | "interview";
 
+/** The age groups a student chooses from. Each has its own modules: the level is about the English, the age group is about the topic and the tone. */
+export type AgeGroup = "under13" | "13to17" | "18plus";
+
 export interface FieldInfo {
   id: FieldId;
   name: string;
@@ -21,12 +24,14 @@ export interface FieldInfo {
 }
 
 export interface LearningModule {
-  /** `${field}-${level}-${goal}` */
+  /** `${field}-${level}-${goal}-${age}` */
   id: string;
   field: FieldId;
   level: Level;
   /** What the student wants to improve. Each goal has its own passage, questions and activity. */
   goal: Goal;
+  /** Who the story, the examples and the questions are written for. */
+  age: AgeGroup;
   title: string;
   /** One sentence shown on the library card. */
   summary: string;

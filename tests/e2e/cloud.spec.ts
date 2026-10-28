@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { getModule } from "../../src/features/content/modules";
-import { completeOnboarding, reportPaper, showReportAsPage } from "./helpers";
+import { findModule } from "../../src/features/content/modules";
+import { completeOnboarding } from "./helpers";
 
 // Cloud mode: Silero VAD (real, in the browser) + Sarvam speech-to-text + Cartesia voice + Groq LLM.
 // The three services are local mocks (tests/e2e/mock-services.mjs), and the "microphone" plays a
@@ -9,8 +9,12 @@ import { completeOnboarding, reportPaper, showReportAsPage } from "./helpers";
 // not prove the real Sarvam, Cartesia or Groq services behave the same way.
 const MOCK = "http://localhost:3101";
 
-test.beforeEach(async ({ request }) => {
+test.beforeEach(async ({ request, page }) => {
   await request.post(`${MOCK}/__reset`);
+  // The test microphone makes a steady sound, so letting it interrupt the coach would cut every message short.
+  await page.addInitScript(() => {
+    localStorage.setItem("acc.v1.settings", JSON.stringify({ cameraDefault: false, keepTranscripts: true, speechRate: 0.95, coachVoice: true, bargeIn: false, speechLang: "en-IN" }));
+  });
 });
 
 async function startPractice(page: import("@playwright/test").Page) {
@@ -29,7 +33,6 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   const browserRequests: string[] = [];
   page.on("request", (r) => browserRequests.push(r.url()));
 
-  await showReportAsPage(page);
   await completeOnboarding(page);
   await expect(page.getByText(/Development mode/)).toHaveCount(0);
   await startPractice(page);
@@ -37,12 +40,13 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
 
   // Reading phase (voice detection loads in the background of Begin).
   await expect(page.getByLabel("Reading passage")).toBeVisible({ timeout: 60_000 });
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click({ timeout: 70_000 });
 
   // Coach speaks through Cartesia; student speech is found by Silero and transcribed by Sarvam.
   await expect(page.getByTestId("coach-message")).toContainText("Hi Riya");
   await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 30_000 });
+  // Whatever the reading used up, the answers start from the first made-up transcript again.
+  await request.post(`${MOCK}/__mode`, { data: { sttCalls: 0 } });
   await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise a company makes/, { timeout: 60_000 });
 
   // The Groq coach answers with a follow-up that is spoken again.
@@ -56,15 +60,15 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   await page.getByRole("button", { name: "Yes, end" }).click();
   await page.waitForURL(/\/report\//, { timeout: 90_000 });
 
-  // The report is the PDF (drawn as a page here): the AI's headline, what went well, what to fix and the camera line.
-  const paper = reportPaper(page);
-  await expect(paper).toBeVisible();
-  await expect(paper.getByText("You explained your ideas clearly today.")).toBeVisible();
-  await expect(paper.getByText("You started with your idea.")).toBeVisible();
-  await expect(paper.getByText("Add examples")).toBeVisible();
-  await expect(paper.getByText("Add one real-life example to each answer.")).toBeVisible();
-  await expect(paper.getByRole("heading", { name: "Your face and body" })).toBeVisible();
-  await expect(paper).toContainText(/camera was off/i);
+  // The report page: the AI's headline, what went well and what to fix in the conversation box, and the camera line.
+  const report = page.getByTestId("report");
+  await expect(report).toBeVisible();
+  await expect(page.getByTestId("report-headline")).toContainText("You explained your ideas clearly today.");
+  const conversation = page.getByTestId("conversation-box").locator("xpath=ancestor::section");
+  await expect(conversation.getByText("You started with your idea.")).toBeVisible();
+  await expect(conversation.getByText("Add examples")).toBeVisible();
+  await expect(conversation.getByText("Add one real-life example to each answer.")).toBeVisible();
+  await expect(page.getByTestId("camera-box").locator("xpath=ancestor::section")).toContainText(/camera was off/i);
   await expect(page.getByText(/AI-written|Development mode/)).toHaveCount(0);
   const html = await page.content();
   expect(html).not.toContain("this sentence was never spoken by the student"); // fabricated quote dropped
@@ -83,7 +87,7 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   expect(log.stt.length).toBeGreaterThanOrEqual(2);
   expect(log.stt[0]).toMatchObject({ apiKey: "test-sarvam", hasWav: true, languageCode: "en-IN" });
   // The reading's own key terms are sent to Sarvam as recognition hints.
-  expect(JSON.parse(log.stt[0].keyterms)).toEqual(getModule("business-marketing-intermediate")!.keyTerms);
+  expect(JSON.parse(log.stt[0].keyterms)).toEqual(findModule("business-marketing", "intermediate", "clarity", "18plus")!.keyTerms);
   expect(log.tts.length).toBeGreaterThanOrEqual(2);
   expect(log.tts[0]).toMatchObject({ authorization: "Bearer test-cartesia", model: "sonic-3.6", voiceId: "test-voice-id", container: "mp3" });
   const chats = log.chat as { model: string; reasoning_effort: string; include_reasoning: boolean; isReport: boolean; authorization: string }[];
@@ -104,8 +108,7 @@ test("cloud speech failure never dead-ends: falls back or offers retry, typing a
   await startPractice(page);
   await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByLabel("Reading passage")).toBeVisible({ timeout: 60_000 });
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click({ timeout: 70_000 });
   await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 30_000 });
 
   // Two failed segments in a row: the app tells the student and keeps going.
@@ -157,9 +160,10 @@ test("live words appear while you speak, before the accurate transcript arrives"
   await startPractice(page);
   await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByLabel("Reading passage")).toBeVisible({ timeout: 60_000 });
-  await page.waitForTimeout(3500);
-  await page.getByRole("button", { name: /finished reading/ }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click({ timeout: 70_000 });
   await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 30_000 });
+  // Whatever the reading used up, the answer starts from the first made-up transcript again.
+  await request.post(`${MOCK}/__mode`, { data: { sttCalls: 0 } });
 
   const live = page.getByTestId("live-transcript");
   await expect(live).toContainText("these are my live words", { timeout: 30_000 });

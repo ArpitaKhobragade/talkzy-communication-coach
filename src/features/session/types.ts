@@ -15,14 +15,20 @@ export const LevelSchema = z.enum(["beginner", "intermediate", "advanced"]);
 export const GoalSchema = z.enum(["fluency", "clarity", "vocabulary", "confidence", "interview"]);
 export const AgeBandSchema = z.enum(["under13", "13to17", "18plus"]);
 
+/** A student who does not know yet can choose "unsure" for the subject, the difficulty or the goal. */
+export const UNSURE = "unsure" as const;
+export const FieldChoiceSchema = z.union([FieldIdSchema, z.literal(UNSURE)]);
+export const LevelChoiceSchema = z.union([LevelSchema, z.literal(UNSURE)]);
+export const GoalChoiceSchema = z.union([GoalSchema, z.literal(UNSURE)]);
+
 // ---------- Profile & settings ----------
 
 export const ProfileSchema = z.object({
   displayName: z.string().transform(cleanName).pipe(z.string().min(1).max(NAME_MAX)),
   ageBand: AgeBandSchema,
-  field: FieldIdSchema,
-  level: LevelSchema,
-  goal: GoalSchema,
+  field: FieldChoiceSchema,
+  level: LevelChoiceSchema,
+  goal: GoalChoiceSchema,
   consent: z.object({
     acceptedAt: z.number(),
     guardianConfirmed: z.boolean(),
@@ -39,6 +45,8 @@ export const SettingsSchema = z.object({
   speechRate: z.number().min(0.6).max(1.3),
   /** Speak the coach's replies aloud. Students who cannot use audio can turn this off. */
   coachVoice: z.boolean(),
+  /** Speaking while the coach talks stops the coach, who then listens. Off if the speakers make the coach hear itself. */
+  bargeIn: z.boolean().default(true),
   /** Speech recognition and the coach's voice use English (India). It is not a setting students can change. */
   speechLang: z.enum(["en-US", "en-GB", "en-IN", "en-AU"]),
 });
@@ -49,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepTranscripts: true,
   speechRate: 0.95,
   coachVoice: true,
+  bargeIn: true,
   speechLang: "en-IN",
 };
 
@@ -80,6 +89,14 @@ export const ReadingResultSchema = z.object({
       wpm: z.number().min(0).nullable(),
       spokenWordCount: z.number().int().min(0),
       missedWords: z.array(z.string()).max(60),
+      /** Parts of the passage that were skipped, as the words themselves. */
+      skipped: z.array(z.string().max(120)).max(6).optional(),
+      /** The start of the part of the passage that was never reached. */
+      unreadTail: z.string().max(160).optional(),
+      /** One letter per passage word: r read, s skipped, m not clear, u not reached. Draws the underlined passage in the report. */
+      marks: z.string().max(4000).optional(),
+      /** Words the recogniser heard as a different word. */
+      misheard: z.array(z.object({ word: z.string().max(40), heard: z.string().max(40) })).max(8).optional(),
     })
     .optional(),
 });
@@ -131,6 +148,8 @@ export const VisionMetricsSchema = z.object({
   worriedPct: z.number().min(0).max(100).nullable().optional(),
   blinkPct: z.number().min(0).max(100).nullable().optional(),
   oddFacePct: z.number().min(0).max(100).nullable().optional(),
+  /** How much of the time the eyes were looking down (at notes or the keyboard). */
+  lookingDownPct: z.number().min(0).max(100).nullable().optional(),
 });
 export type VisionMetrics = z.infer<typeof VisionMetricsSchema>;
 
@@ -265,7 +284,12 @@ export const CoachTurnRequestSchema = z.object({
     .array(z.object({ role: z.enum(["coach", "student"]), text: z.string().max(2000) }))
     .max(40),
   /** Signals from the client: silence, unclear speech, etc. */
-  event: z.enum(["answer", "silence", "unclear", "start"]).default("answer"),
+  event: z.enum(["answer", "silence", "unclear", "start", "skip", "ask"]).default("answer"),
+  /**
+   * The place in the module's seven questions of the NEXT question to ask (0 is the opening question). The app
+   * counts it, so questions the student asked, or skipped, do not shift the plan.
+   */
+  ladderIndex: z.number().int().min(0).max(60).optional(),
 });
 export type CoachTurnRequest = z.infer<typeof CoachTurnRequestSchema>;
 

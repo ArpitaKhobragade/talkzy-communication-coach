@@ -1,4 +1,4 @@
-import type { Goal, Level } from "../content/types";
+import type { FieldId, Goal, Level } from "../content/types";
 import { modulesFor } from "../content/modules";
 import type { LearningModule } from "../content/types";
 import type { Profile, Session } from "../session/types";
@@ -101,16 +101,38 @@ const avg = (xs: (number | null)[]) => {
 };
 
 /**
- * Recommend the next module. It is always for the subject and goal saved in the profile (they are
- * changed only there). The recent sessions decide the difficulty and the tip that is shown.
+ * What a student who is not sure what to improve should work on, from how their recent sessions went:
+ * many fillers means fluency, short answers means clarity, repeated plain words means vocabulary,
+ * otherwise confidence. With no sessions yet, clarity (point, reason, example) is the best start.
+ */
+export function goalFromSessions(recent: Session[]): Goal {
+  if (recent.length === 0) return "clarity";
+  const filler = avg(recent.map((s) => s.speech.fillerPer100));
+  const answerWords = avg(recent.map((s) => s.speech.avgAnswerWords));
+  const variety = avg(recent.map((s) => s.speech.lexicalVariety));
+  if (filler !== null && filler >= 3) return "fluency";
+  if (answerWords !== null && answerWords < 25) return "clarity";
+  if (variety !== null && variety < 0.5) return "vocabulary";
+  return "confidence";
+}
+
+/**
+ * Recommend the next module. The subject, difficulty and goal saved in the profile are kept (they are
+ * changed only there). A choice the student left as "not sure yet" is worked out from their sessions:
+ * the goal from how they spoke, the difficulty from the last session, the subject from the last module.
+ * The recent sessions also decide the tip that is shown.
  */
 export function recommendNext(profile: Profile, sessions: Session[]): Recommendation {
   const completed = sessions.filter((s) => s.completed); // newest first
   const recent = completed.slice(0, 3);
 
-  const goal: Goal = profile.goal;
-  let reason = "A good place to start, based on the subject, level and goal you chose.";
-  let level: Level = profile.level;
+  const anyUnsure = profile.field === "unsure" || profile.level === "unsure" || profile.goal === "unsure";
+  const goal: Goal = profile.goal === "unsure" ? goalFromSessions(recent) : profile.goal;
+  const field: FieldId = profile.field === "unsure" ? (sessions[0]?.field ?? "school-general") : profile.field;
+  let reason = anyUnsure
+    ? "A friendly place to start. Try it, and we will suggest better ones as you practise."
+    : "A good place to start, based on the subject, level and goal you chose.";
+  let level: Level = profile.level === "unsure" ? "beginner" : profile.level;
 
   if (recent.length > 0) {
     const filler = avg(recent.map((s) => s.speech.fillerPer100));
@@ -144,7 +166,7 @@ export function recommendNext(profile: Profile, sessions: Session[]): Recommenda
     }
   }
 
-  const choices = modulesFor(profile.field, goal);
+  const choices = modulesFor(field, goal, profile.ageBand);
   const recentIds = new Set(recent.map((s) => s.moduleId));
   const target = choices.find((m) => m.level === level) ?? choices[0];
   // Prefer a module not practised recently so the passage is fresh.

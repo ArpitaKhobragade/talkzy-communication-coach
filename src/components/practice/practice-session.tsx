@@ -17,7 +17,7 @@ import { ttsSupported } from "@/features/speech/synthesis";
 import { VisionAnalyzer } from "@/features/vision/analyzer";
 import { requestReport } from "@/services/coach-api";
 import { newId, saveSession } from "@/services/storage";
-import { VadSession } from "@/features/speech/vad-session";
+import { prefetchVadAssets, VadSession } from "@/features/speech/vad-session";
 import { useServerStatus } from "@/services/use-coach-mode";
 import { useNow } from "@/services/use-now";
 import { useHydrated, useProfile, useSessions, useSettings } from "@/services/use-storage";
@@ -26,6 +26,8 @@ import { ConversationPhase } from "./conversation-phase";
 import { ReadingPhase } from "./reading-phase";
 
 type Phase = "setup" | "reading" | "conversation" | "finishing" | "save-error";
+/** If the accurate voice detector is not ready after this long, reading starts with the browser's voice recognition. */
+const VAD_WAIT_MS = 3500;
 type VisionState = "off" | "loading" | "on" | "failed";
 
 export function PracticeSession({ moduleId }: { moduleId: string }) {
@@ -46,6 +48,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
   const [mediaNotes, setMediaNotes] = useState<string[]>([]);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [vad, setVad] = useState<VadSession | null>(null);
+  const [vadPending, setVadPending] = useState(false);
   const vadRef = useRef<VadSession | null>(null);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const [vision, setVision] = useState<VisionState>("off");
@@ -62,7 +65,8 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
 
   const lesson = getModule(moduleId);
   // Each module is made for one goal, so the practice follows the module the student opened.
-  const goal: Goal = lesson?.goal ?? profile?.goal ?? "confidence";
+  const profileGoal = profile?.goal === "unsure" ? "confidence" : profile?.goal;
+  const goal: Goal = lesson?.goal ?? profileGoal ?? "confidence";
   // Recomputed when stored sessions load (the first render sees an empty server snapshot).
   const clock = useNow();
   const plan = useMemo(() => planSession(sessions, clock), [sessions, clock]);
@@ -74,6 +78,11 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
   // True while the practice screen is alive and has not finished. Late async work checks it.
   const active = useRef(true);
   const visionStarted = useRef(false);
+
+  // Download the voice detector while the student reads the set-up screen, so pressing Begin is quick.
+  useEffect(() => {
+    if (phase === "setup" && hydrated && useMic && status.stt === "sarvam") prefetchVadAssets();
+  }, [phase, hydrated, useMic, status.stt]);
 
   // Load the camera models as soon as the camera box is ticked, so the camera is ready the moment the session starts.
   useEffect(() => {
@@ -144,32 +153,17 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
   async function begin() {
     setStarting(true);
     const notes: string[] = [];
+    // Ask for the microphone and the camera at the same time, so the student answers one prompt, not two in a row.
+    const [mic, camera] = await Promise.all([useMic && voiceSupported ? requestMicrophone() : null, useCam ? requestCamera() : null]);
     let audio: MediaStream | null = null;
-    let voiceDetector: VadSession | null = null;
-    if (useMic && voiceSupported) {
-      const r = await requestMicrophone();
-      if (r.ok) audio = r.stream;
-      else notes.push(describeMediaFailure("microphone", r.reason));
-    }
-    // Cloud speech-to-text needs Silero voice detection. If it cannot load, fall back to the browser's recogniser.
-    if (audio && status.stt === "sarvam") {
-      try {
-        voiceDetector = await VadSession.create(audio);
-      } catch {
-        notes.push(
-          recognitionSupported()
-            ? "Voice detection could not load, so your browser's own voice recognition will be used instead."
-            : "Voice detection could not load, so please type your answers.",
-        );
-      }
-    }
-    vadRef.current = voiceDetector;
-    setVad(voiceDetector);
     let cam: MediaStream | null = null;
-    if (useCam) {
-      const r = await requestCamera();
-      if (r.ok) cam = r.stream;
-      else notes.push(describeMediaFailure("camera", r.reason));
+    if (mic) {
+      if (mic.ok) audio = mic.stream;
+      else notes.push(describeMediaFailure("microphone", mic.reason));
+    }
+    if (camera) {
+      if (camera.ok) cam = camera.stream;
+      else notes.push(describeMediaFailure("camera", camera.reason));
     }
     audioRef.current = audio;
     camRef.current = cam;
@@ -177,11 +171,42 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
     setCamStream(cam);
     setMediaNotes(notes);
 
+    // The reading screen opens straight away. The accurate voice detector loads in the background; if it is slow,
+    // reading starts with the browser's own voice recognition, and the detector is used later in the conversation.
+    const loadDetector = !!audio && status.stt === "sarvam";
+    setVadPending(loadDetector);
+
     const now = Date.now();
     timing.current = { startedAt: now, deadline: now + plan.budgetSec * 1000, budgetSec: plan.budgetSec };
     setDeadline(timing.current.deadline);
     setPhase("reading");
     setStarting(false);
+
+    if (audio && loadDetector) {
+      const slow = recognitionSupported() ? setTimeout(() => setVadPending(false), VAD_WAIT_MS) : null;
+      VadSession.create(audio)
+        .then((detector) => {
+          if (!active.current) {
+            void detector.destroy();
+            return;
+          }
+          vadRef.current = detector;
+          setVad(detector);
+        })
+        .catch(() => {
+          if (!active.current) return;
+          setMediaNotes((n) => [
+            ...n,
+            recognitionSupported()
+              ? "Voice detection could not load, so your browser's own voice recognition will be used instead."
+              : "Voice detection could not load, so please type your answers.",
+          ]);
+        })
+        .finally(() => {
+          if (slow) clearTimeout(slow);
+          setVadPending(false);
+        });
+    }
   }
 
   const onReadingDone = useCallback((r: { reading: ReadingResult; readingSec: number }) => {
@@ -435,7 +460,7 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
               </Notice>
             </div>
           ))}
-          <ReadingPhase module={lesson} stream={audioStream} vad={vad} lang={settings.speechLang} onDone={onReadingDone} />
+          <ReadingPhase module={lesson} stream={audioStream} vad={vad} vadPending={vadPending} lang={settings.speechLang} onDone={onReadingDone} />
         </div>
       )}
 

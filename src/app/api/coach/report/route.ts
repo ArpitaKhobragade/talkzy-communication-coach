@@ -1,4 +1,4 @@
-import { extractJson, verifyFeedback } from "@/features/coach/verify";
+import { dropNulls, extractJson, verifyFeedback } from "@/features/coach/verify";
 import { generate, isLiveMode } from "@/features/coach/server/llm";
 import { reportSystemPrompt, reportUserPrompt } from "@/features/coach/server/prompts";
 import { getModule } from "@/features/content/modules";
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         ],
         maxTokens: 1800,
       });
-      const checked = AiFeedbackSchema.parse(extractJson(text));
+      const checked = AiFeedbackSchema.parse(dropNulls(extractJson(text)));
       const { feedback, droppedQuotes } = verifyFeedback(checked, studentAnswers);
       return Response.json({ ai: feedback, model, droppedQuotes });
     } catch (err) {
