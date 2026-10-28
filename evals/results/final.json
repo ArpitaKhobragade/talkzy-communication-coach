@@ -1,0 +1,444 @@
+{
+  "when": "2026-10-26T20:12:55.562Z",
+  "summary": {
+    "reports": {
+      "attempts": 4,
+      "succeeded": 1,
+      "firstTryPct": 25,
+      "successPct": 25,
+      "avgSeconds": 4.3,
+      "maxSeconds": 4.3
+    },
+    "findsMistakes": {
+      "plantedMistakesChecked": 3,
+      "recallPct": 100,
+      "consistencyPct": null
+    },
+    "honesty": {
+      "claimsChecked": 4,
+      "supportedPct": 100,
+      "misleadingPct": 0,
+      "strengthsTruePct": 100,
+      "inventedProblemsOnMistakeSessionsPct": 0,
+      "inventedProblemsOnControlPct": null,
+      "realIssuesOnControlPct": null,
+      "quotesReallySaidPct": 100,
+      "quotesRemovedByServer": 0,
+      "numbersNotInTheData": 0
+    },
+    "corrections": {
+      "checked": 0,
+      "pointAtARealMistakePct": null,
+      "mistakeRemovedPct": null
+    },
+    "easeOfReading": {
+      "shortReportWords": 117,
+      "shortReportGrade": 4.6,
+      "avgSentenceWords": 11.7,
+      "longestSentenceWords": 20,
+      "jargonWordsFound": [],
+      "fullReportWords": 287
+    },
+    "judgeRatings": {
+      "accuracy": 5,
+      "specificity": 4,
+      "actionability": 4,
+      "simpleLanguage": 5,
+      "tone": 5,
+      "outOf": 5
+    },
+    "measuredNumbers": {
+      "fillerCountExactPct": 100,
+      "fillerCounts": [
+        "S1: found 16 of 16",
+        "S2: found 0 of 0",
+        "S3: found 2 of 2",
+        "S4: found 0 of 0"
+      ],
+      "likeNotCounted": [
+        "S1: 3",
+        "S2: 0",
+        "S3: 1",
+        "S4: 0"
+      ],
+      "misreadRecallPct": 100,
+      "misreadPrecisionPct": 100,
+      "coverageErrorPoints": [
+        "S1: said 100% (true 100%)",
+        "S2: said 100% (true 100%)",
+        "S3: said 55% (true 55%)",
+        "S4: said 100% (true 100%)"
+      ],
+      "paceErrorPct": 0
+    },
+    "coachQuestions": [
+      {
+        "module": "computer-science-beginner-fluency",
+        "difficultyInOrder": [
+          1,
+          1,
+          1,
+          3,
+          3,
+          5,
+          5
+        ],
+        "orderCorrelation": 0.94,
+        "neverEasierPct": 100,
+        "meanDifficultyEasyMediumHard": {
+          "easy": 1,
+          "medium": 3,
+          "hard": 5
+        },
+        "relatedToReadingPct": 57.1,
+        "exactlyOneQuestionPct": 100,
+        "avgReplyWords": 35,
+        "longestReplyWords": 52
+      },
+      {
+        "module": "science-advanced-confidence",
+        "difficultyInOrder": [
+          1,
+          2,
+          3,
+          3,
+          3,
+          5,
+          5
+        ],
+        "orderCorrelation": 0.95,
+        "neverEasierPct": 100,
+        "meanDifficultyEasyMediumHard": {
+          "easy": 2,
+          "medium": 3,
+          "hard": 5
+        },
+        "relatedToReadingPct": 100,
+        "exactlyOneQuestionPct": 100,
+        "avgReplyWords": 33,
+        "longestReplyWords": 47
+      }
+    ]
+  },
+  "details": {
+    "measured": [
+      {
+        "scenario": "S1",
+        "fillers": {
+          "truth": 16,
+          "found": 16,
+          "truthIncludingLike": 19
+        },
+        "reading": {
+          "planted": [
+            "writes",
+            "button",
+            "through",
+            "cables",
+            "second",
+            "screen"
+          ],
+          "missed": [
+            "writes",
+            "button",
+            "through",
+            "cables",
+            "second",
+            "screen"
+          ],
+          "recall": 100,
+          "precision": 100,
+          "coveragePct": 100,
+          "expectedCoveragePct": 100
+        },
+        "pace": {
+          "truth": 66,
+          "found": 66
+        },
+        "repetitions": {
+          "found": []
+        }
+      },
+      {
+        "scenario": "S2",
+        "fillers": {
+          "truth": 0,
+          "found": 0,
+          "truthIncludingLike": 0
+        },
+        "reading": {
+          "planted": [
+            "believe"
+          ],
+          "missed": [
+            "believe"
+          ],
+          "recall": 100,
+          "precision": 100,
+          "coveragePct": 100,
+          "expectedCoveragePct": 100
+        },
+        "pace": {
+          "truth": 112,
+          "found": 112
+        },
+        "repetitions": {
+          "found": [
+            "very very"
+          ]
+        }
+      },
+      {
+        "scenario": "S3",
+        "fillers": {
+          "truth": 2,
+          "found": 2,
+          "truthIncludingLike": 3
+        },
+        "reading": {
+          "planted": [],
+          "missed": [],
+          "recall": null,
+          "precision": null,
+          "coveragePct": 55,
+          "expectedCoveragePct": 55
+        },
+        "pace": {
+          "truth": 82,
+          "found": 82
+        },
+        "repetitions": {
+          "found": []
+        }
+      },
+      {
+        "scenario": "S4",
+        "fillers": {
+          "truth": 0,
+          "found": 0,
+          "truthIncludingLike": 0
+        },
+        "reading": {
+          "planted": [
+            "protect"
+          ],
+          "missed": [
+            "protect"
+          ],
+          "recall": 100,
+          "precision": 100,
+          "coveragePct": 100,
+          "expectedCoveragePct": 100
+        },
+        "pace": {
+          "truth": 122,
+          "found": 122
+        },
+        "repetitions": {
+          "found": []
+        }
+      }
+    ],
+    "runs": [
+      {
+        "scenario": "S1",
+        "run": 1,
+        "ok": true,
+        "seconds": 4.3,
+        "model": "openai/gpt-oss-120b",
+        "droppedQuotes": 0,
+        "shortText": "Good try answering each question, now let’s add detail and cut the fillers.\nReading: About 129 words a minute. That is a good speed for reading out loud.\nAnswering: Reduce filler words Try this: Practice speaking slowly and count fillers; aim for fewer than 10 per minute.\nReading: The app understood 94% of the words you read, but these were not clear: writes, button, through, cables, second, screen. Try this: Say each of these words slowly three times, then read the passage again.\nSay it like this: It goes to the tower.\nFiller word count. Record yourself answering a question, then listen and count how many \"um\", \"uh\", \"you know\" you use. Try to reduce the count by half.",
+        "fullText": "Headline: Good try answering each question, now let’s add detail and cut the fillers.\nStrength: Answered every prompt. You gave a response to each coach question. (quote: \"Um, yes, I send messages to my, uh, friends.\")\nImprove: Reduce filler words. Try to pause instead of saying \"um\", \"uh\", \"you know\". (quote: \"Um, I use my phone, uh, for, you know, games.\") Tip: Practice speaking slowly and count fillers; aim for fewer than 10 per minute.\nImprove: Give more complete answers. Add a reason or example when you answer. (quote: \"Uh, it goes, like, to the tower. Um, basically that is it.\") Tip: After the main idea, say one extra detail, e.g., \"It goes to the tower, then travels through cables.\"\nVocabulary: No major vocabulary issues found. \nSay it better: \"Uh, it goes, like, to the tower. Um, basically that is it.\" -> \"It goes to the tower.\". Removes filler and unclear phrase.\nSay it better: \"Um, I use my phone, uh, for, you know, games. And, um, videos. That is all.\" -> \"I use my phone for games and videos.\". Clear and concise without fillers.\nReading: You read the whole passage; the app understood 94% of the words at 129 wpm. Went well: Covered the entire passage High accuracy of recognized words Improve: Missed words like \"writes\" and \"cables\" (Practice saying those words slowly and clearly.)\nExercise (5 min): Filler word count. Record yourself answering a question, then listen and count how many \"um\", \"uh\", \"you know\" you use. Try to reduce the count by half.\nExercise (7 min): Detail practice. Describe how a text message travels in three sentences, adding one detail for each step.\nNext focus: Focus on speaking with fewer filler words and adding more detail to your answers.",
+        "shortReadability": {
+          "words": 117,
+          "sentences": 10,
+          "avgSentenceWords": 11.7,
+          "longestSentenceWords": 20,
+          "grade": 4.6,
+          "hardWordPct": 3.4,
+          "jargon": []
+        },
+        "fullReadability": {
+          "words": 287,
+          "sentences": 27,
+          "avgSentenceWords": 10.6,
+          "longestSentenceWords": 25,
+          "grade": 5,
+          "hardWordPct": 4.5,
+          "jargon": []
+        },
+        "quotesChecked": 5,
+        "quotesFound": 5,
+        "unverifiedNumbers": [],
+        "judge": {
+          "planted": [
+            {
+              "id": "S1-fillers",
+              "verdict": "yes",
+              "evidence": "The report explicitly mentions 'Reduce filler words', lists the specific fillers used ('um', 'uh', 'you know'), and provides an action plan to count and reduce them."
+            },
+            {
+              "id": "S1-short",
+              "verdict": "yes",
+              "evidence": "The opening sentence says 'now let’s add detail', directly addressing the lack of detail in the short answers."
+            },
+            {
+              "id": "S1-misread",
+              "verdict": "yes",
+              "evidence": "The report lists the exact 6 missed words ('writes, button, through, cables, second, screen') and advises the student to practice them."
+            }
+          ],
+          "claims": [
+            {
+              "text": "Reading speed was about 129 words a minute.",
+              "label": "supported"
+            },
+            {
+              "text": "129 words a minute is a good speed for reading out loud.",
+              "label": "supported"
+            },
+            {
+              "text": "The app understood 94% of the words you read.",
+              "label": "supported"
+            },
+            {
+              "text": "The words 'writes, button, through, cables, second, screen' were not clear.",
+              "label": "supported"
+            }
+          ],
+          "improvements": [
+            {
+              "title": "Reduce filler words",
+              "label": "real_issue"
+            },
+            {
+              "title": "Reading: The app understood 94% of the words you read, but these were not clear: writes, button, through, cables, second, screen.",
+              "label": "real_issue"
+            }
+          ],
+          "strengths": [
+            {
+              "title": "Good try answering each question",
+              "label": "true"
+            }
+          ],
+          "ratings": {
+            "accuracy": 5,
+            "specificity": 4,
+            "actionability": 4,
+            "simpleLanguage": 5,
+            "tone": 5
+          },
+          "notes": "The report is accurate and kind, but it could be more specific about the 'short answers' issue by citing the average word count or asking for a specific example to expand."
+        },
+        "firstTry": true
+      },
+      {
+        "scenario": "S2",
+        "run": 1,
+        "ok": false,
+        "reason": "The AI service could not produce the written feedback this time. Your measured results are shown below.",
+        "seconds": 0.8,
+        "firstTry": false
+      },
+      {
+        "scenario": "S3",
+        "run": 1,
+        "ok": false,
+        "reason": "The AI service could not produce the written feedback this time. Your measured results are shown below.",
+        "seconds": 0.8,
+        "firstTry": false
+      },
+      {
+        "scenario": "S4",
+        "run": 1,
+        "ok": false,
+        "reason": "The AI service could not produce the written feedback this time. Your measured results are shown below.",
+        "seconds": 0.7,
+        "firstTry": false
+      }
+    ],
+    "convos": [
+      {
+        "moduleId": "computer-science-beginner-fluency",
+        "questions": [
+          "Do you send messages to your friends? Who do you message the most?",
+          "What happens right after Mia presses the send button in the story?",
+          "Can you describe what happens to the message after it reaches the friend’s phone, like what the phone does?",
+          "How do you feel when you get a quick reply from a friend, and why do you think quick responses are important?",
+          "” Why do you think she chose a short reply instead of writing a longer message, and how did that make you feel?",
+          "If you had to choose only one type of communication—text messages, phone calls, or social media posts—to stay connected with friends and family, which would you pick and why?",
+          "If you could send a message to yourself ten years from now, what would you write and what do you hope will happen after you read it?"
+        ],
+        "difficulty": [
+          1,
+          1,
+          1,
+          3,
+          3,
+          5,
+          5
+        ],
+        "related": [
+          false,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false
+        ],
+        "spearman": 0.94,
+        "nonDecreasingPct": 100,
+        "stageMeans": {
+          "easy": 1,
+          "medium": 3,
+          "hard": 5
+        },
+        "oneQuestionPct": 100,
+        "avgWords": 35,
+        "maxWords": 52
+      },
+      {
+        "moduleId": "science-advanced-confidence",
+        "questions": [
+          "What is one benefit of gene editing that supporters mention?",
+          "Which type of inherited disease do you think would be the most urgent to treat first?",
+          "You mentioned the embryo issue—what do you think about the idea that future generations might be affected by edits we make today?",
+          "If a family could afford a gene edit to boost height, how might that affect their child’s social life or self‑esteem compared to a child who didn’t get the edit?",
+          "Why do you think it matters if only some families can afford new treatments, especially when it could change a child’s future?",
+          "If gene editing could make some kids healthier or smarter, do you think society should set limits on who gets it, or should everyone have equal access?",
+          "Imagine a future where gene editing is common for disease prevention—how would you weigh the benefits of reducing suffering against the risk that society might still value “enhanced” traits more, potentially creating new pressures on people who choose to stay natural?"
+        ],
+        "difficulty": [
+          1,
+          2,
+          3,
+          3,
+          3,
+          5,
+          5
+        ],
+        "related": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "spearman": 0.95,
+        "nonDecreasingPct": 100,
+        "stageMeans": {
+          "easy": 2,
+          "medium": 3,
+          "hard": 5
+        },
+        "oneQuestionPct": 100,
+        "avgWords": 33,
+        "maxWords": 47
+      }
+    ]
+  }
+}
