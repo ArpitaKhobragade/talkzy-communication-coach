@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  /* Sunrise palette: warm cream page, plum text, peach-to-coral accents. */
+  --color-paper: #fff4e8;
+  --color-surface: #ffffff;
+  --color-ink: #2b1d3a;
+  --color-muted: #6e5b80;
+  --color-line: #f1d9c3;
+  --color-accent: #ff5e7a;
+  --color-accent-dark: #e8405f;
+  --color-accent-ink: #b8264a;
+  --color-accent-soft: #ffe6d6;
+  --color-good: #0f8f6c;
+  --color-good-soft: #e6f8f1;
+  --color-warn: #b45500;
+  --color-warn-soft: #fff0dd;
+  --color-bad: #d1304a;
+  --color-bad-soft: #ffe6ea;
+  --radius-card: 1.75rem;
+  --shadow-card: 0 10px 30px rgba(255, 94, 122, 0.12);
+  --shadow-lift: 0 12px 28px rgba(43, 29, 58, 0.22);
+  --font-sans: "Nunito Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Fredoka Variable", "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Light only: tells the browser not to force a dark page or dark form controls. */
+html {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-paper);
+}
+
+body {
+  background-color: var(--color-paper);
+  background-image: radial-gradient(520px 280px at 100% 0%, #ffe0c2 0%, transparent 70%);
+  background-repeat: no-repeat;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Reading passage: comfortable measure and line height for read-aloud practice. */
+.passage {
+  font-size: 1.25rem;
+  line-height: 1.85;
+  max-width: 62ch;
+}
+
+@media (min-width: 768px) {
+  .passage {
+    font-size: 1.375rem;
+  }
+}
+
+/* Coach orb: soft rings that pulse while the coach speaks or the student is being heard. */
+@keyframes orb-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.22); opacity: 0.12; }
+}
+.orb-ring {
+  animation: orb-pulse 2s ease-in-out infinite;
+}
+.orb-ring-2 {
+  animation-delay: 0.7s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-ring {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
