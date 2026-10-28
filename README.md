@@ -31,16 +31,16 @@ Each session has two phases and ends with a report.
 
 - **Reading starts by itself** when the microphone is ready, and **ends by itself** when the student reaches the end of the passage. There is no start or finish button (a button appears only if voice is not available, or after a long quiet time).
 - **Starting is quick:** the microphone and camera are asked for together, the reading screen opens straight away, and the voice detector loads in the background (its files are also downloaded early, while the student reads the set-up screen).
-- **Words appear as they are spoken**, straight from the browser's live recogniser.
-- **"Are you done?"** When the student stops speaking, the coach asks whether they are finished. "Yes" moves on. "I want to say more" makes the coach say it is listening; when the student stops again, the coach asks "Should we move to the next question?". Two buttons do the same. No reply for a few seconds counts as yes.
+- **Words appear as they are spoken.** Chrome and Edge show their own live words at once, and nothing extra is asked of the speech service. In any other browser, the audio heard so far is sent for transcription every 1.6 seconds, so the words show up about a second or two behind the voice. That is limited to 30 requests a minute per server and backs off on errors, because Sarvam's pay-as-you-go plan allows only 60 requests a minute for the whole account. During the reading, each passage word is underlined as soon as it is heard (green read, red skipped, orange not clear). A matcher that does not jump ahead keeps the underline steady. The saved transcript always comes from the accurate speech service, never from the live words. The speech service is asked for English letters; if it ever returns Hindi letters, it is asked again for Roman letters.
+- **No "Are you done?".** The coach never decides by itself that an answer is finished, and never cuts in. The words stay on the screen, and the student taps the big **Next question** button (or says "next question"). After a few quiet seconds the button is pointed out ("Finished? Tap Next question."). A question to the coach is answered on its own.
 - **Interrupting:** speaking over the coach stops the coach, who then listens (it needs the voice detector; turn it off in Settings if the speakers make the coach hear itself).
-- **"Next question":** ending an answer with "next question", "that's all" or "I'm done" moves on at once, with no "Are you done?". "Repeat the question" and "give me a hint" are done at once too.
+- **"Next question":** the button, or ending an answer with "next question", "that's all" or "I'm done", sends the answer and moves on at once. With no words at all, it skips the question. "Repeat the question" and "give me a hint" are done at once too.
 - **Questions and interruptions:** the student can ask the coach anything, even if it is not about the lesson. The coach answers first, in simple words, and then goes back to the practice with one question.
 - **Wait, let me think:** saying "wait", "hold on" or "let me think" makes the coach say one short line and then stay quiet for longer. The coach also waits longer when a sentence stops in the middle ("... because", "umm").
 - **Speaking over the coach:** the coach stops and listens at once. With the accurate voice detector it uses that; without it, it listens to the loudness of the microphone. It can be turned off in Settings.
 - **Any topic:** the coach follows the student's lead on any harmless topic (science, sport, careers, study advice, English words), practises speaking with them there, and offers to go back to the lesson later. It follows the module's seven questions in order and judges each answer against a note on what a strong answer contains.
 - **Ending by voice:** saying "end the session", "I want to stop" or "give me my report" ends the session at once.
-- **Coach voice:** if the studio voice (Cartesia) fails, the browser voice takes over at once and the reason is shown. **Settings, Test the coach's voice** says why the studio voice is not working (key, credit, or voice name).
+- **Coach voice:** Cartesia is used first. If it fails (no credit, a wrong key, too slow), the app uses **Sarvam's own voice** with the same Sarvam key, and does not ask Cartesia again for a few minutes. Only if both fail does the browser voice take over, and the reason is shown. **Settings, Test the coach's voice** says why the studio voice is not working (key, credit, or voice name).
 
 ## The feedback report
 
@@ -111,7 +111,7 @@ More screens: [onboarding](docs/screenshots/01-onboarding.png), [library](docs/s
 - **AI:** **Groq** writes the coach's replies (`openai/gpt-oss-20b`, fast) and the report (`openai/gpt-oss-120b`, more accurate). Anthropic is an optional alternative.
 - **Camera:** MediaPipe Face and Pose Landmarker, running on the device through WebAssembly. The models start loading as soon as the camera box is ticked, so they are ready when the session begins.
 - **Report files:** jsPDF, in the browser.
-- **Tests:** Vitest (5,510 unit tests, including checks of all 360 modules) and Playwright (35 end-to-end tests).
+- **Tests:** Vitest (5,520 unit tests, including checks of all 360 modules) and Playwright (37 end-to-end tests).
 - **AI quality check:** `npm run eval` runs made-up sessions with planted mistakes through the real AI and marks the result. See [How well does the AI feedback work?](docs/EVALUATION.md).
 
 API keys are read only by server code and never sent to the browser. A Content-Security-Policy (`connect-src 'self'`) stops the page contacting any outside server.

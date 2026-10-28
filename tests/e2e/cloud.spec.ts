@@ -49,7 +49,8 @@ test("cloud voice journey: VAD + Sarvam + Cartesia + Groq, AI report with verifi
   await request.post(`${MOCK}/__mode`, { data: { sttCalls: 0 } });
   await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise a company makes/, { timeout: 60_000 });
 
-  // The Groq coach answers with a follow-up that is spoken again.
+  // The coach waits for the student: "Next question" sends the answer, and the Groq coach asks a follow-up that is spoken again.
+  await page.getByRole("button", { name: "Next question" }).click();
   await expect(page.getByTestId("coach-message")).toContainText("Can you give me an example from your own life", { timeout: 60_000 });
 
   // A second spoken answer, then end the session from the always-visible top bar.
@@ -125,37 +126,10 @@ test("cloud speech failure never dead-ends: falls back or offers retry, typing a
   await expect(page.getByRole("heading", { name: "Your feedback report" })).toBeVisible();
 });
 
-test("live words appear while you speak, before the accurate transcript arrives", async ({ page, request }) => {
-  // The speech service answers 7 seconds late. The browser's own recogniser (faked here) supplies the live words.
+test("words appear while you speak, before the accurate transcript arrives, with no browser recogniser needed", async ({ page, request }) => {
+  // The speech service answers 7 seconds late for a finished stretch of speech. The first words of what is being said are
+  // sent while the student is still speaking, and those come back at once.
   await request.post(`${MOCK}/__mode`, { data: { stt: "slow" } });
-  await page.addInitScript(() => {
-    class LiveRecognition {
-      lang = "en-IN";
-      continuous = true;
-      interimResults = true;
-      maxAlternatives = 1;
-      onresult: ((e: unknown) => void) | null = null;
-      onerror: ((e: unknown) => void) | null = null;
-      onend: (() => void) | null = null;
-      private timer: ReturnType<typeof setTimeout> | undefined;
-      start() {
-        this.timer = setTimeout(() => {
-          const r = Object.assign([{ transcript: "these are my live words", confidence: 0 }], { isFinal: false });
-          this.onresult?.({ resultIndex: 0, results: { length: 1, 0: r } });
-        }, 600);
-      }
-      stop() {
-        clearTimeout(this.timer);
-      }
-      abort() {
-        clearTimeout(this.timer);
-      }
-    }
-    const w = window as unknown as Record<string, unknown>;
-    w.SpeechRecognition = LiveRecognition;
-    w.webkitSpeechRecognition = LiveRecognition;
-  });
-
   await completeOnboarding(page);
   await startPractice(page);
   await page.getByRole("button", { name: "Begin" }).click();
@@ -166,8 +140,7 @@ test("live words appear while you speak, before the accurate transcript arrives"
   await request.post(`${MOCK}/__mode`, { data: { sttCalls: 0 } });
 
   const live = page.getByTestId("live-transcript");
-  await expect(live).toContainText("these are my live words", { timeout: 30_000 });
-  // The accurate transcript replaces the live words once it arrives.
-  await expect(live).toContainText(/A brand is the promise a company makes/, { timeout: 60_000 });
-  await expect(live).not.toContainText("these are my live words");
+  await expect(live).toContainText("A brand is the promise a company", { timeout: 30_000 });
+  // The accurate transcript replaces the first words once it arrives, and it is longer.
+  await expect(live).toContainText(/matters because people buy from names they trust/, { timeout: 60_000 });
 });

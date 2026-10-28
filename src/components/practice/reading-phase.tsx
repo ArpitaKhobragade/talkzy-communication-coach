@@ -79,7 +79,9 @@ export function ReadingPhase({
     lastChange.current = Date.now();
     const id = setInterval(() => {
       setElapsed(Math.round((Date.now() - startedAt.current) / 1000));
-      setQuietMs(Date.now() - lastChange.current);
+      // Quiet means no new words AND no voice heard: words can pause for a moment while the student is still reading.
+      const heardIdle = capture.current?.idleMs();
+      setQuietMs(heardIdle === undefined ? Date.now() - lastChange.current : Math.min(Date.now() - lastChange.current, heardIdle));
     }, 500);
     return () => clearInterval(id);
   }, []);
@@ -111,7 +113,8 @@ export function ReadingPhase({
       const res = await c.end();
       c.dispose();
       capture.current = null;
-      text = res.text;
+      // If the accurate transcript has nothing, the words that were shown on the screen are used.
+      text = res.text || lastText.current;
       speakingSec = res.timing.speakingSec;
     }
     const durationSec = Math.round((Date.now() - startedAt.current) / 1000);
@@ -194,7 +197,7 @@ export function ReadingPhase({
   const offerSkip = !checking && ((!listening && !!notice) || elapsed > OFFER_AFTER_SEC || (listening && started && quietMs > OFFER_SKIP_MS));
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5 pb-44">
       <div className="space-y-3">
         <PhaseSteps current={1} />
         <div className="flex flex-wrap items-center justify-between gap-3">

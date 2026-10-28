@@ -74,6 +74,14 @@ createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/speech-to-text") {
     const raw = await readBody(req);
     const text = raw.toString("latin1");
+    const partial = req.headers["x-talkzy-purpose"] === "partial";
+    // Words sent while the student is still speaking are not logged and do not use up a made-up transcript:
+    // they get the first words of the transcript that comes next, so the test can see words appear before the final text.
+    if (partial) {
+      if (state.sttMode === "fail") return json(res, 500, { error: { message: "mock failure" } });
+      const next = TRANSCRIPTS[state.sttCalls % TRANSCRIPTS.length];
+      return json(res, 200, { request_id: "mock", transcript: next.split(" ").slice(0, 7).join(" "), language_code: "en-IN" });
+    }
     log.stt.push({
       apiKey: req.headers["api-subscription-key"],
       bytes: raw.length,

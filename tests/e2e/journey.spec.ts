@@ -42,16 +42,16 @@ test("emojis cannot be typed in the name, and the dashboard greeting has no subj
 
 /**
  * What the fake recogniser "hears", one entry each time the app starts listening: the reading (the whole passage, so the
- * reading ends by itself), then each answer followed by the student's reply to "Are you done?".
+ * reading ends by itself), then one entry for each answer. The coach never asks "Are you done?": the words stay on the
+ * screen, and the student taps "Next question" (or ends the answer with the words "next question").
  */
 const PASSAGE = findModule("business-marketing", "intermediate", "clarity", "18plus")!.passage.replace(/\n\n/g, " ");
-const SAY_MORE = "No, I want to say more.";
-const MORE_WORDS = "Also, a strong brand needs steady quality over many years, so that people can trust it.";
-const YES = "Yes, move on.";
-const VOICE_SCRIPT = [PASSAGE, VOICE_ANSWERS[0], YES, VOICE_ANSWERS[1], SAY_MORE, MORE_WORDS, YES, ...VOICE_ANSWERS.slice(2).flatMap((a) => [a, YES])];
+const VOICE_SCRIPT = [PASSAGE, VOICE_ANSWERS[0], `${VOICE_ANSWERS[1]} Next question.`, VOICE_ANSWERS[2], "I want to end the session."];
+
+const spokenByCoach = (page: import("@playwright/test").Page) => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
 
 test("full voice journey with mocked speech APIs: read, converse, report, history", async ({ page }) => {
-  test.setTimeout(330_000); // the coach now waits a few seconds after each answer before asking "Are you done?"
+  test.setTimeout(240_000);
   await mockSpeech(page, VOICE_SCRIPT);
   await completeOnboarding(page);
 
@@ -77,16 +77,22 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i, { timeout: 15_000 });
 
-  // When the student stops, the coach asks whether they are done, and the student says yes.
-  await expect(page.getByTestId("coach-prompt")).toContainText(/Are you done/i, { timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Yes, next question" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => /Are you done/.test(t)).length)).toBeGreaterThan(0);
+  // The coach does not ask "Are you done?" and does not move on by itself: the words stay, and the button is pointed out.
+  await expect(page.getByTestId("next-hint")).toContainText(/Finished\? Tap Next question/, { timeout: 20_000 });
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya");
+  await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i);
+  expect((await spokenByCoach(page)).filter((t) => /Are you done/.test(t))).toHaveLength(0);
 
-  // The conversation continues until the coach wraps up. One answer is followed by "I want to say more":
-  // the coach says it is listening, and then asks again whether to move on.
+  // "Next question" sends the answer, and the coach asks the next question.
+  await page.getByRole("button", { name: "Next question" }).click();
   await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 30_000 });
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken.filter((t) => /I am listening/.test(t)).length), { timeout: 120_000 }).toBeGreaterThan(0);
-  await page.waitForURL(/\/report\//, { timeout: 300_000 });
+  // The second answer ends with the words "next question", so it moves on without a tap. The third is sent with the button.
+  await expect(page.getByTestId("live-transcript")).toContainText(/my local bakery/i, { timeout: 30_000 });
+  await expect(page.getByText("Your turn: speak now")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("live-transcript")).toContainText(/discount can help/i, { timeout: 40_000 });
+  await page.getByRole("button", { name: "Next question" }).click();
+  // Then the student asks to end the session, which opens the report.
+  await page.waitForURL(/\/report\//, { timeout: 120_000 });
 
   // The report page: boxes for reading, conversation and face and body, a download button, and a link to practise next.
   await expect(page.getByTestId("report")).toBeVisible();
@@ -98,6 +104,10 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
   for (const gone of [/Development mode/, /AI-written feedback/, /This was a short session/, /See the full report/, /How these results were measured/, /All the numbers/, /More detail/]) {
     await expect(page.getByText(gone)).toHaveCount(0);
   }
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
+  const answers = stored.turns.filter((t: { role: string }) => t.role === "student");
+  expect(answers).toHaveLength(3);
+  expect(answers[1].text).not.toMatch(/next question/i); // the command is not part of the answer
 
   // History and progress.
   await page.goto("/progress");
@@ -106,12 +116,13 @@ test("full voice journey with mocked speech APIs: read, converse, report, histor
 });
 
 test("saying 'I want to end the session' ends it straight away", async ({ page }) => {
-  // The reading, one answer, and then the reply to "Are you done?" is an end request.
+  // The reading, one answer sent with the button, and then the request to end.
   await mockSpeech(page, [PASSAGE, VOICE_ANSWERS[0], "I want to end the session."]);
   await completeOnboarding(page);
   await page.getByRole("link", { name: /Start today.s practice/ }).click();
   await page.getByRole("button", { name: "Begin" }).click();
   await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i, { timeout: 40_000 });
+  await page.getByRole("button", { name: "Next question" }).click();
   await page.waitForURL(/\/report\//, { timeout: 40_000 });
   await expect(page.getByTestId("report")).toBeVisible();
   // The answer already given is kept, and the end request is not counted as an answer.
@@ -127,13 +138,26 @@ test("ending an answer with 'next question' moves on at once, without asking 'Ar
   await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 40_000 });
   await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 40_000 }); // the coach asked the next question
   await page.waitForURL(/\/report\//, { timeout: 40_000 });
-  const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
-  expect(spoken.filter((t) => /Are you done/.test(t))).toHaveLength(0);
+  expect((await spokenByCoach(page)).filter((t) => /Are you done/.test(t))).toHaveLength(0);
   // The answer is kept without the command at its end.
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("acc.v1.sessions") ?? "[]")[0]);
   const answers = stored.turns.filter((t: { role: string }) => t.role === "student");
   expect(answers).toHaveLength(1);
   expect(answers[0].text).not.toMatch(/next question/i);
+});
+
+test("the coach never asks 'Are you done?': a finished answer waits for the Next question button", async ({ page }) => {
+  await mockSpeech(page, [PASSAGE, VOICE_ANSWERS[0], "I want to end the session."]);
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await expect(page.getByTestId("live-transcript")).toContainText(/A brand is the promise/i, { timeout: 40_000 });
+  // Long after the last word, nothing has been said by the coach and the question has not changed.
+  await page.waitForTimeout(12_000);
+  await expect(page.getByTestId("coach-message")).toContainText("Hi Riya");
+  await expect(page.getByTestId("coach-prompt")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Yes, next question" })).toHaveCount(0);
+  expect((await spokenByCoach(page)).filter((t) => /Are you done|Shall we move/.test(t))).toHaveLength(0);
 });
 
 test("a question to the coach is answered at once, even when it is not about the lesson", async ({ page }) => {
@@ -144,8 +168,7 @@ test("a question to the coach is answered at once, even when it is not about the
   await expect(page.getByTestId("coach-message")).toContainText("Hi Riya", { timeout: 40_000 });
   await expect(page.getByTestId("coach-message")).not.toContainText("Hi Riya", { timeout: 40_000 });
   await page.waitForURL(/\/report\//, { timeout: 40_000 });
-  const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
-  expect(spoken.filter((t) => /Are you done/.test(t))).toHaveLength(0);
+  expect((await spokenByCoach(page)).filter((t) => /Are you done/.test(t))).toHaveLength(0);
 });
 
 test("saying 'wait, let me think' makes the coach wait quietly instead of asking anything new", async ({ page }) => {
@@ -160,6 +183,17 @@ test("saying 'wait, let me think' makes the coach wait quietly instead of asking
   // Only the opening message: the coach asked nothing new, and "wait" was not counted as an answer.
   expect(stored.turns.filter((t: { role: string }) => t.role === "coach")).toHaveLength(1);
   expect(stored.turns.filter((t: { role: string }) => t.role === "student")).toHaveLength(0);
+});
+
+test("Next question works without saying anything: the coach moves to the next question", async ({ page }) => {
+  await completeOnboarding(page);
+  await page.getByRole("link", { name: /Start today.s practice/ }).click();
+  await page.getByRole("button", { name: "Begin" }).click();
+  await page.getByRole("button", { name: /Start the conversation/ }).click();
+  await expect(page.getByText(/Your turn/)).toBeVisible({ timeout: 30_000 });
+  const first = await page.getByTestId("coach-message").innerText();
+  await page.getByRole("button", { name: "Next question" }).click();
+  await expect(page.getByTestId("coach-message")).not.toHaveText(first, { timeout: 30_000 });
 });
 
 test("saying 'end the session' while answering also ends it", async ({ page }) => {

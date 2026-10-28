@@ -30,6 +30,8 @@ export interface VadListener {
   onSegment: (segment: VadSegment) => void;
   /** 0-1 probability that the current audio frame is speech. */
   onLevel: (speechProbability: number) => void;
+  /** Every audio frame (16 kHz mono, a copy that is safe to keep) with its speech probability. Used to show words while the student is still speaking. */
+  onFrame?: (frame: Float32Array, speechProbability: number) => void;
 }
 
 export class VadUnavailableError extends Error {}
@@ -67,7 +69,12 @@ export class VadSession {
         onSpeechStart: () => holder.session?.handleStart(),
         onSpeechEnd: (audio: Float32Array) => holder.session?.handleEnd(audio),
         onVADMisfire: () => holder.session?.handleMisfire(),
-        onFrameProcessed: (probs: { isSpeech: number }) => holder.session?.listener?.onLevel(probs.isSpeech),
+        onFrameProcessed: (probs: { isSpeech: number }, frame: Float32Array) => {
+          const l = holder.session?.listener;
+          if (!l) return;
+          l.onLevel(probs.isSpeech);
+          l.onFrame?.(frame.slice(), probs.isSpeech);
+        },
       });
       if (timedOut) {
         void vad.destroy();

@@ -145,3 +145,41 @@ describe("reading: the start of the passage, how much was reached, and a mark fo
     expect(analyzeReadingAloud(text, text, 25)!.marks).toBe("r".repeat(words.length));
   });
 });
+
+describe("reading while it is still being heard (the first few words)", () => {
+  const long =
+    "Your team receives bug reports from users. A good team does not simply guess. It follows a steady process so that the fix is correct and the same bug does not return. First, the engineer tries to reproduce the problem, which means making it happen again on purpose. If the bug cannot be reproduced, it is almost impossible to fix with confidence. Next, the engineer searches for the cause by reading logs and testing small changes.";
+  const words = tokenize(long);
+
+  it("does not mark the whole passage as skipped because a few common words match far ahead", () => {
+    // Only the start has been heard, and the recogniser got it a little different. "a" and "that" also appear much later.
+    const al = alignReading(words, tokenize("a team receives bug reports from users a good that"));
+    const skipped = al.status.filter((s) => s === "skipped").length;
+    expect(skipped).toBeLessThanOrEqual(3);
+    expect(al.status[words.length - 1]).toBe("unread");
+  });
+
+  it("underlines the words as more of the passage is heard, one word at a time, without jumping ahead", () => {
+    const heard = words.slice(0, 40);
+    let lastRead = 0;
+    for (let n = 8; n <= heard.length; n += 4) {
+      const al = alignReading(words, heard.slice(0, n));
+      const read = al.status.filter((s) => s === "read").length;
+      expect(read).toBeGreaterThanOrEqual(lastRead); // it only moves forward
+      expect(read).toBeLessThanOrEqual(n);
+      expect(al.status.filter((s) => s === "skipped").length).toBeLessThanOrEqual(2);
+      lastRead = read;
+    }
+    expect(lastRead).toBeGreaterThanOrEqual(36);
+  });
+
+  it("still lines up a student who starts in the middle of the passage, or jumps over a sentence", () => {
+    const fromMiddle = alignReading(words, words.slice(30, 70));
+    expect(fromMiddle.first).toBeGreaterThanOrEqual(28);
+    expect(fromMiddle.status[0]).toBe("skipped");
+
+    const jumped = alignReading(words, [...words.slice(0, 20), ...words.slice(35, 70)]);
+    expect(jumped.status.slice(20, 35).filter((s) => s === "skipped").length).toBeGreaterThanOrEqual(10);
+    expect(jumped.status[40]).toBe("read");
+  });
+});

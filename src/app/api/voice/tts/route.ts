@@ -1,4 +1,4 @@
-import { synthesizeSpeech, ttsConfigured, VoiceUpstreamError, voiceFailureHint } from "@/features/coach/server/voice";
+import { speakWithBestVoice, ttsConfigured, VoiceUpstreamError, voiceFailureHint } from "@/features/coach/server/voice";
 import { jsonError, parseRequest } from "@/lib/api-helpers";
 import { z } from "zod";
 
@@ -10,16 +10,16 @@ const Body = z.object({
   speed: z.number().min(0.6).max(1.5).default(1),
 });
 
-/** Text-to-speech proxy (Cartesia). Streams MP3 back; the voice ID is fixed on the server. */
+/** Text-to-speech proxy. Streams MP3 back; the Cartesia voice ID is fixed on the server, and Sarvam's voice is the backup. */
 export async function POST(req: Request) {
   if (!ttsConfigured()) return jsonError(501, "tts_not_configured", "Cloud voice is not configured.");
 
-  const parsed = await parseRequest(req, Body, "tts", 90);
+  const parsed = await parseRequest(req, Body, "tts", 240);
   if ("response" in parsed) return parsed.response;
 
   try {
-    const upstream = await synthesizeSpeech(parsed.data.text, parsed.data.speed);
-    return new Response(upstream.body, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
+    const { body } = await speakWithBestVoice(parsed.data.text, parsed.data.speed);
+    return new Response(body, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
   } catch (err) {
     console.error("[voice/tts] failed:", err instanceof Error ? err.message : "unknown");
     const hint = err instanceof VoiceUpstreamError ? voiceFailureHint(err.status, err.detail) : voiceFailureHint(0);
@@ -27,18 +27,19 @@ export async function POST(req: Request) {
   }
 }
 
-/** Voice check for the owner: GET /api/voice/tts?check=1 says whether the studio voice works, and if not, why. */
+/** Voice check for the owner: GET /api/voice/tts?check=1 says whether the coach voice works, and if not, why. */
 export async function GET(req: Request) {
   if (new URL(req.url).searchParams.get("check") !== "1") return jsonError(400, "bad_request", "Use ?check=1.");
-  if (!ttsConfigured()) return Response.json({ ok: false, hint: "The studio voice is not set up. Add CARTESIA_API_KEY and CARTESIA_VOICE_ID. The browser voice is used instead." });
+  if (!ttsConfigured()) return Response.json({ ok: false, hint: "The coach voice is not set up. Add SARVAM_API_KEY (or CARTESIA_API_KEY and CARTESIA_VOICE_ID). The browser voice is used instead." });
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
   const limited = await parseRequest(new Request(req.url, { method: "POST", headers, body: JSON.stringify({ text: "Hello", speed: 1 }) }), Body, "tts-check", 10);
   if ("response" in limited) return limited.response;
   try {
     // A short sentence, like a real coach message, so a nearly empty credit is noticed too.
-    await synthesizeSpeech("Hello, I am your coach. Let us begin.", 1);
-    return Response.json({ ok: true, hint: "The studio voice is working." });
+    // The check always asks Cartesia, even if it was marked as down a moment ago, so it tells the owner the truth.
+    const { via } = await speakWithBestVoice("Hello, I am your coach. Let us begin.", 1, { ignoreCoolOff: true });
+    return Response.json({ ok: true, via, hint: via === "cartesia" ? "The studio voice is working." : "Sarvam's voice is being used (the Cartesia voice is not available)." });
   } catch (err) {
     return Response.json({ ok: false, hint: err instanceof VoiceUpstreamError ? voiceFailureHint(err.status, err.detail) : voiceFailureHint(0) });
   }

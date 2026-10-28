@@ -13,7 +13,7 @@ Friendly, calm, encouraging. Rounded, spacious, readable by a 10-year-old and a 
 ## Patterns
 - **Two phases**: Phase 1 Reading, Phase 2 Conversation, shown with a two-segment progress bar and the visible labels "Phase 1 of 2: Reading" / "Phase 2 of 2: Conversation".
 - **Dashboard**: one hero card: daily 20-minute ring on the left, today's recommendation and the two phases on the right, one primary action.
-- **Conversation**: a coach orb (rings pulse while the coach speaks or the student is heard; static under reduced motion), a status chip, the question in large type, the live transcript as a quote card, one primary action ("I'm done speaking"), and always-visible Type instead / End session.
+- **Conversation**: a coach orb (rings pulse while the coach speaks or the student is heard; static under reduced motion), a status chip, the question in large type, the live transcript as a quote card, one primary action ("Next question"), and always-visible Type instead / End session.
 - **Report**: three sections (reading, answering, camera) with icon chips; each has "What went well", "What to improve" and "How to improve". Numbers sit in a collapsible section.
 - **Buttons**: one primary action per screen; visible focus ring (3px accent, 2px offset); 44px minimum height (48px for large); pressed state moves 1px and scales 0.985.
 

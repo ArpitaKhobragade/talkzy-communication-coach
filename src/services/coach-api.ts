@@ -37,7 +37,7 @@ export interface ReportResult {
 
 export async function requestReport(body: ReportRequest): Promise<ReportResult> {
   try {
-    const data = (await postJson("/api/coach/report", body, 75_000)) as { ai?: unknown; reason?: string; model?: string };
+    const data = (await postJson("/api/coach/report", body, 40_000)) as { ai?: unknown; reason?: string; model?: string };
     const ai = data.ai ? AiFeedbackSchema.safeParse(data.ai) : null;
     if (ai?.success) return { ai: ai.data, model: data.model };
     return { ai: null, reason: data.reason ?? "The written feedback could not be generated this time." };

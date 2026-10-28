@@ -15,7 +15,7 @@ import { computeSpeechMetrics, countWords } from "@/features/speech/metrics";
 import { recognitionSupported } from "@/features/speech/recognition";
 import { ttsSupported } from "@/features/speech/synthesis";
 import { VisionAnalyzer } from "@/features/vision/analyzer";
-import { requestReport } from "@/services/coach-api";
+import { requestReport, type ReportResult } from "@/services/coach-api";
 import { newId, saveSession } from "@/services/storage";
 import { prefetchVadAssets, VadSession } from "@/features/speech/vad-session";
 import { useServerStatus } from "@/services/use-coach-mode";
@@ -92,9 +92,16 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
   // The report progress bar. It moves steadily while the AI writes, then jumps to 100% when the report is ready.
   const [progress, setProgress] = useState(0);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** After a while the student can carry on to the report without waiting for the written feedback. */
+  const [canSkipWait, setCanSkipWait] = useState(false);
+  const skipWait = useRef<(() => void) | null>(null);
+  const skipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startProgress = useCallback(() => {
     const t0 = Date.now();
     setProgress(3);
+    setCanSkipWait(false);
+    if (skipTimer.current) clearTimeout(skipTimer.current);
+    skipTimer.current = setTimeout(() => setCanSkipWait(true), 15_000);
     progressTimer.current = setInterval(() => {
       const sec = (Date.now() - t0) / 1000;
       setProgress((p) => Math.max(p, Math.min(92, Math.round(92 * (1 - Math.exp(-sec / 2.4))))));
@@ -103,6 +110,9 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
   const stopProgress = useCallback(() => {
     if (progressTimer.current) clearInterval(progressTimer.current);
     progressTimer.current = null;
+    if (skipTimer.current) clearTimeout(skipTimer.current);
+    skipTimer.current = null;
+    setCanSkipWait(false);
   }, []);
 
   // Stop every device when leaving the page.
@@ -238,7 +248,11 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
       if (answers === 0) {
         aiReason = "No answers were captured in this session, so there was nothing to review.";
       } else if (mode === "live") {
-        const res = await requestReport({
+        // The written feedback is raced against the "continue without it" button, so the report is never stuck waiting.
+        const waiting = new Promise<ReportResult>((resolve) => {
+          skipWait.current = () => resolve({ ai: null, reason: "You chose not to wait for the written feedback. Your measured results are shown below." });
+        });
+        const res = await Promise.race([requestReport({
           moduleId: lesson.id,
           goal,
           level: lesson.level,
@@ -249,7 +263,8 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
           readingMode: readingRef.current.reading.mode,
           readingSec: readingRef.current.readingSec,
           passageWords: countWords(lesson.passage),
-        });
+        }), waiting]);
+        skipWait.current = null;
         ai = res.ai;
         aiReason = res.reason;
         model = res.model;
@@ -260,30 +275,62 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
       stopProgress();
       setProgress(100);
       await new Promise((resolve) => setTimeout(resolve, 400)); // let the bar reach 100% before the page changes
-      const session = buildSession({
-        id: newId(),
-        startedAt: timing.current.startedAt,
-        endedAt: Date.now(),
-        budgetSec: timing.current.budgetSec,
-        moduleId: lesson.id,
-        field: lesson.field,
-        level: lesson.level,
-        goal,
-        liveAi: mode === "live" && !r.degraded,
-        readingSec: readingRef.current.readingSec,
-        passageWords: countWords(lesson.passage),
-        reading: readingRef.current.reading,
-        turns: r.turns,
-        vision: visionMetrics,
-        cameraOn,
-        keepTranscript: settings.keepTranscripts,
-        ai,
-        aiReason,
-        model,
-      });
-      pending.current = session;
-      if (saveSession(session)) router.replace(`/report/${session.id}`);
-      else {
+      const make = (feedback: typeof ai, reason: string | undefined, turns: Turn[]) =>
+        buildSession({
+          id: newId(),
+          startedAt: timing.current.startedAt,
+          endedAt: Date.now(),
+          budgetSec: timing.current.budgetSec,
+          moduleId: lesson.id,
+          field: lesson.field,
+          level: lesson.level,
+          goal,
+          liveAi: mode === "live" && !r.degraded && !!feedback,
+          readingSec: readingRef.current.readingSec,
+          passageWords: countWords(lesson.passage),
+          reading: readingRef.current.reading,
+          turns,
+          vision: visionMetrics,
+          cameraOn,
+          keepTranscript: settings.keepTranscripts,
+          ai: feedback,
+          aiReason: reason,
+          model,
+        });
+      // Saving can never leave the student stuck on this screen: if the data does not fit the saved format,
+      // it is cleaned (numbers made safe, long text cut) and saved again without the written feedback.
+      let session: ReturnType<typeof buildSession> | null = null;
+      let saved = false;
+      try {
+        session = make(ai, aiReason, r.turns);
+        saved = saveSession(session);
+      } catch {
+        try {
+          const safe = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : undefined);
+          const cleanTurns = r.turns.map((t) => ({
+            ...t,
+            text: t.text.slice(0, 3500),
+            speakingSec: safe(t.speakingSec),
+            pauseCount: safe(t.pauseCount) === undefined ? undefined : Math.round(t.pauseCount ?? 0),
+            longestPauseSec: safe(t.longestPauseSec),
+            latencySec: safe(t.latencySec),
+          }));
+          session = make(null, "The written feedback could not be saved this time. Your measured results are shown below.", cleanTurns);
+          saved = saveSession(session);
+        } catch {
+          saved = false;
+        }
+      }
+      if (session) pending.current = session;
+      if (saved && session) {
+        router.replace(`/report/${session.id}`);
+        // If the page did not change (a stale page after an update, or a blocked navigation), open the report the plain way.
+        const id = session.id;
+        setTimeout(() => {
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a deliberate plain page load, used only when the router did not move
+          if (window.location.pathname.startsWith("/practice")) window.location.assign(`${window.location.origin}/report/${id}`);
+        }, 2500);
+      } else {
         setSaveError(true);
         setPhase("save-error");
       }
@@ -343,8 +390,16 @@ export function PracticeSession({ moduleId }: { moduleId: string }) {
           <div className="h-full rounded-full bg-black transition-[width] duration-200" style={{ width: `${progress}%` }} />
         </div>
         <p className="text-sm font-semibold text-muted" role="status">
-          {progress >= 100 ? "Done!" : progress < 25 ? "Counting your words and pauses..." : progress < 60 ? "Checking your answers..." : "Writing your feedback..."}
+          {progress >= 100 ? "Done! Opening your report..." : progress < 25 ? "Counting your words and pauses..." : progress < 60 ? "Checking your answers..." : "Writing your feedback..."}
         </p>
+        {canSkipWait && progress < 100 && (
+          <div className="space-y-2">
+            <p className="text-sm text-muted">This is taking longer than usual.</p>
+            <Button variant="secondary" onClick={() => skipWait.current?.()}>
+              Show my report now
+            </Button>
+          </div>
+        )}
       </div>
     );
   }

@@ -14,7 +14,8 @@ export interface SpeakOptions {
 const CLOUD_CHUNK_CHARS = 300;
 /** The first piece is short, so the voice starts sooner: the rest is made while the first piece plays. */
 const FIRST_CHUNK_CHARS = 110;
-const FETCH_TIMEOUT_MS = 6_000;
+/** The server tries Cartesia first (up to 8 s) and then Sarvam's voice, so the browser waits long enough for the backup. */
+const FETCH_TIMEOUT_MS = 14_000;
 /** After the cloud voice fails, the browser voice is used straight away (no waiting) for this long. */
 const COOL_OFF_MS = 5 * 60_000;
 

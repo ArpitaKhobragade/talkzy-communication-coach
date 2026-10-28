@@ -44,7 +44,7 @@ Not automated (the test doubles prove our logic, not the real services):
 1. Open `/api/status`: expect `{"mode":"live","llm":"groq","stt":"sarvam","tts":"cartesia"}`.
 2. **Coach voice:** the coach should speak in your Cartesia voice with no cut-off. If you hear the browser voice instead, check `CARTESIA_VOICE_ID` and the server log for `[voice/tts] failed: cartesia_http_<status>`.
 3. **Long answer:** speak for 40+ seconds with a few 1-2 second thinking pauses. The answer must not be cut off; the live text should keep growing; after you stop it should send about 3 seconds later.
-4. **"I'm done speaking"** sends immediately. **Type instead** works at any moment. **End session** (top bar) works at any moment and keeps the sentence you were saying.
+4. **"Next question"** sends the answer immediately (with no words it skips the question). The coach never asks "Are you done?". **Type instead** works at any moment. **End session** (top bar) works at any moment and keeps the sentence you were saying.
 5. **Recognition quality:** say domain words from the passage (they are sent to Sarvam as hints). If transcripts are empty, check the server log for `[voice/stt] failed: sarvam_http_<status>` (401/403 means a bad key; 4xx on `keyterms` is retried without it automatically).
 6. **Failure handling:** put a wrong `SARVAM_API_KEY`; after two failed segments the app should switch to the browser recogniser or offer "Try voice again", never a dead end.
 7. **Report:** it should have three sections (reading, answering, camera) each with what went well, what to improve and how; quotes must be words you said; with the camera on, the camera section should name specific things (face out of view, looking away, posture, movement) with a fix for each.

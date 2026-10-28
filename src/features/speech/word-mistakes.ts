@@ -77,7 +77,7 @@ const RULES: Rule[] = [
     why: "Verbs of knowing, liking and wanting are not used with \"am ...ing\".",
   },
   { re: /\b(they|we|you|I) has\b/gi, to: (_m, who) => `${who} have`, why: "With I, you, we and they, use \"have\"." },
-  { re: new RegExp(`(?<!\b(?:${MODALS_AND_HELPERS})\s)\b(he|she|it) have\b`, "gi"), to: (_m, who) => `${who} has`, why: "With he, she and it, use \"has\"." },
+  { re: new RegExp(`(?<!\\b(?:${MODALS_AND_HELPERS})\\s)\\b(he|she|it) have\\b`, "gi"), to: (_m, who) => `${who} has`, why: "With he, she and it, use \"has\"." },
   {
     re: new RegExp(`(?<!\\b(?:${MODALS_AND_HELPERS})\\s)\\b(he|she) (go|want|like|need|know|think|say|make|take|give|get|play|work|study|live|speak|help|feel|come|love)\\b(?!\\w)`, "gi"),
     to: (_m, who, verb) => `${who} ${thirdPerson(verb.toLowerCase())}`,

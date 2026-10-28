@@ -9,7 +9,6 @@ import {
   Microphone,
   PaperPlaneRight,
   Pause,
-  Question,
   SignOut,
   SkipForward,
   SpeakerHigh,
@@ -20,12 +19,11 @@ import { Badge, Button, Notice, PhaseSteps } from "@/components/ui";
 import { devCoachReply, openingMessage } from "@/features/coach/dev-coach";
 import { DIFFICULTY_LABEL, difficultyOfQuestion, questionNumberAfter } from "@/features/coach/ladder";
 import type { Goal, LearningModule } from "@/features/content/types";
-import { commandIntent, confirmIntent, endIntent, endsUnfinished, isContinuation, looksLikeQuestion, nextCommand, stripNextCommand } from "@/features/practice/intents";
+import { commandIntent, endIntent, looksLikeQuestion, nextCommand, stripNextCommand } from "@/features/practice/intents";
 import type { CoachTurnRequest, Profile, Settings, Turn } from "@/features/session/types";
 import type { CaptureFatal, CaptureResult, TurnCaptureLike } from "@/features/speech/capture";
 import { createCapture, fallbackEngine, pickEngine, type EngineKind } from "@/features/speech/engine";
 import { watchForInterruption } from "@/features/speech/energy-barge";
-import { recognitionSupported } from "@/features/speech/recognition";
 import { speakCoach } from "@/features/speech/speaker";
 import { stopSpeaking, ttsSupported, type SpeakHandle } from "@/features/speech/synthesis";
 import type { VadSession } from "@/features/speech/vad-session";
@@ -33,30 +31,24 @@ import { newId } from "@/services/storage";
 import { requestCoachTurn } from "@/services/coach-api";
 import type { CoachMode } from "@/services/use-coach-mode";
 
-/**
- * After the student has been quiet this long, the coach asks whether they are finished. Short enough that
- * the conversation feels quick, long enough that a thinking pause does not count as the end.
+/*
+ * The coach never decides by itself that an answer is finished, and never asks "Are you done?". The student taps
+ * "Next question" (or says "next question") when they have finished. Only a question to the coach is answered on its own.
  */
-const DONE_CHECK_MS = 3000;
-/** After a very short answer the coach waits longer, because the student may still be thinking of what to add. */
-const DONE_CHECK_SHORT_MS = 5000;
-/** When the last words stop in the middle of a sentence ("and the", "because", "umm") the student is still thinking. */
-const DONE_CHECK_OPEN_MS = 6500;
-/** The student asked for time ("wait", "let me think"), so the coach keeps quiet for longer. */
-const DONE_CHECK_PATIENT_MS = 9000;
-const SHORT_ANSWER_WORDS = 8;
-/** An answer with this many words counts as an answer even if the student does not reply to "Are you done?". */
-const ENOUGH_WORDS = 12;
-/** After the student answers the coach's "are you done?", this much quiet means the reply is complete. */
-const REPLY_IDLE_MS = 1100;
-/** No reply at all to "are you done?" for this long: the coach takes it as yes and carries on. */
-const CONFIRM_WAIT_MS = 10_000;
+/** A spoken question to the coach (it ends with a question mark) is answered after this much quiet. */
+const QUESTION_WAIT_MS = 1800;
+/** The same when the words only look like a question, without a question mark: wait longer, the student may be mid-answer. */
+const QUESTION_WAIT_PLAIN_MS = 3500;
+/** A spoken command ("repeat the question", "wait", "give me a hint") is done after this much quiet. */
+const COMMAND_WAIT_MS = 800;
+/** After this much quiet with words on the screen, the "Next question" button is pointed out. */
+const NUDGE_MS = 3500;
 /** Nothing heard for this long: the coach gently offers help. */
 const SILENCE_MS = 14_000;
 /** The same, after the student asked for time to think. */
 const PATIENT_SILENCE_MS = 35_000;
-/** Safety cap for a single spoken answer. */
-const MAX_ANSWER_MS = 90_000;
+/** Safety cap for a single spoken answer: after this long, and a moment of quiet, the answer is sent. */
+const MAX_ANSWER_MS = 180_000;
 /** After this many silent prompts in a row, wait for the student to press a button. */
 const MAX_SILENCES = 3;
 /** Interrupting the coach: speech must be clear (probability) and last this many frames (about half a second). */
@@ -65,12 +57,7 @@ const BARGE_FRAMES = 16;
 /** The coach's first moments are never interrupted, so a breath or a click cannot cut it off. */
 const BARGE_AFTER_MS = 900;
 
-const ASK_DONE = "Are you done, or do you want to say more?";
-const ASK_NEXT = "Shall we move to the next question?";
-const ASK_AGAIN = "Sorry, I did not catch that. Shall we move on?";
-const SAY_LISTENING = "Okay, I am listening.";
-
-type Status = "starting" | "coach" | "listening" | "confirming" | "thinking" | "paused";
+type Status = "starting" | "coach" | "listening" | "thinking" | "paused";
 
 const FATAL_TEXT: Record<CaptureFatal, string> = {
   "not-allowed": "Voice is blocked in this browser. Allow the microphone from the lock icon in the address bar, then press \"Try voice again\". You can also type.",
@@ -92,7 +79,6 @@ interface PendingAnswer {
   lowConfidence?: boolean;
 }
 
-const wordCount = (t: string) => t.split(/\s+/).filter(Boolean).length;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 interface Props {
@@ -128,7 +114,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const [typed, setTyped] = useState("");
   const [remaining, setRemaining] = useState(() => Math.max(0, Math.round((deadline - Date.now()) / 1000)));
   const [confirmEnd, setConfirmEnd] = useState(false);
-  const [hasText, setHasText] = useState(false);
+  /** The student has been quiet for a moment with words on the screen: the "Next question" button is pointed out. */
+  const [nudge, setNudge] = useState(false);
   const [closingMessage, setClosingMessage] = useState(false);
 
   const run = useRef(0);
@@ -156,14 +143,10 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
   const typedRef = useRef("");
   const interimRef = useRef("");
   const pending = useRef<PendingAnswer | null>(null);
-  const askedDone = useRef(false);
-  const unclearReplies = useRef(0);
   const bargeRun = useRef(0);
   const voiceNoted = useRef(false);
   /** The place in the module's seven questions of the next question to ask (the opening question is 0 and is asked first). */
   const ladder = useRef(1);
-  /** How many times the coach asked "Are you done?" for the answer being built. */
-  const confirmAsks = useRef(0);
   /** True after the student asked for time ("wait", "let me think"): the coach waits longer and says nothing. */
   const patient = useRef(false);
   /** Stops the loudness watcher that hears the student speaking over the coach. */
@@ -207,7 +190,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     capture.current?.dispose();
     capture.current = null;
     showInterim("");
-    setHasText(false);
+    setNudge(false);
   };
 
   const finish = () => {
@@ -401,14 +384,11 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         };
   }
 
-  /** Sends the whole answer to the coach. */
-  function submitPending(myRun: number) {
+  /** Sends the whole answer to the coach. `asAnswer` is true when the student ended it themselves ("Next question"), so it is never taken as a question to the coach. */
+  function submitPending(myRun: number, asAnswer = false) {
     const p = pending.current;
     pending.current = null;
-    askedDone.current = false;
-    confirmAsks.current = 0;
     patient.current = false;
-    unclearReplies.current = 0;
     abortCapture();
     setPrompt(null);
     if (!p || !p.text) {
@@ -417,7 +397,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       return;
     }
     // A question or a request to the coach is answered first; it does not count as the answer to the lesson question.
-    const asking = looksLikeQuestion(p.text);
+    const asking = !asAnswer && looksLikeQuestion(p.text);
     addTurn({
       role: "student",
       text: p.text,
@@ -443,8 +423,11 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     listen(myRun);
   }
 
-  /** The student stopped speaking. Ask whether they are finished, then act on what they say. */
-  async function endOfSpeech(myRun: number, direct = false) {
+  /**
+   * The student's answer is finished (they tapped "Next question", said it, or asked the coach something). What they said is
+   * checked for a command, and then sent to the coach.
+   */
+  async function endOfSpeech(myRun: number, fromButton = false) {
     const c = capture.current;
     if (!c || busy.current) return;
     busy.current = true;
@@ -454,14 +437,14 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     c.dispose();
     capture.current = null;
     showInterim("");
-    setHasText(false);
+    setNudge(false);
 
     const text = res.text.trim();
     if (text && endIntent(text)) {
       endBySpeech();
       return;
     }
-    // "Repeat the question" and "give me a hint" are done at once, without asking "Are you done?".
+    // "Repeat the question", "give me a hint" and "wait" are done at once.
     const command = commandIntent(text);
     if (command === "hold") {
       busy.current = false;
@@ -474,24 +457,18 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       else needHint();
       return;
     }
-    const words = wordCount(text);
-    if (!text || (res.confidence !== null && res.confidence < 0.4 && words < 4)) {
-      if (pending.current) void confirmTurn(myRun);
+    if (!text) {
+      // Nothing could be made out. What they said earlier is the answer; with the button, the question is skipped.
+      if (pending.current) submitPending(myRun, fromButton);
+      else if (fromButton) skipQuestion(myRun);
       else void askCoach("unclear", myRun);
       return;
     }
-    // "...next question" at the end: the answer is finished, so there is no "Are you done?".
-    if (nextCommand(text)) {
-      const answer = stripNextCommand(text);
-      if (answer) addToPending(answer, res);
-      if (pending.current) submitPending(myRun);
-      else void skipQuestion(myRun);
-      return;
-    }
-    addToPending(text, res);
-    // A question to the coach is sent at once: the coach answers it and carries on.
-    if (direct || looksLikeQuestion(text)) submitPending(myRun);
-    else void confirmTurn(myRun);
+    // "...next question" at the end is a command, not a part of the answer.
+    const answer = nextCommand(text) ? stripNextCommand(text) : text;
+    if (answer) addToPending(answer, res);
+    if (pending.current) submitPending(myRun, fromButton || nextCommand(text));
+    else skipQuestion(myRun);
   }
 
   /** The student said "next question" without answering: the coach moves on to the next question. */
@@ -502,102 +479,22 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     void askCoach("skip", myRun);
   }
 
-  /** Asks "Are you done?" (or "Should we move to the next question?") and listens for the reply. */
-  async function confirmTurn(myRun: number) {
-    busy.current = false;
-    setStatusBoth("confirming");
-    const first = !askedDone.current;
-    askedDone.current = true;
-    confirmAsks.current += 1;
-    const ok = await speakAside(first ? ASK_DONE : ASK_NEXT, myRun);
-    if (!ok || statusRef.current !== "confirming") return;
-    listenForReply(myRun);
-  }
-
-  function listenForReply(myRun: number) {
-    if (!voiceOkRef.current || engine.current === "none") return; // typed answers use the buttons
-    abortCapture();
-    // The browser's recogniser answers a short "yes" or "no" almost at once, so it is used for replies when it is there.
-    const kind: EngineKind = inputsRef.current.stream && recognitionSupported() ? "browser" : engine.current;
-    const c = createCapture(kind, inputsRef.current, module.id, {
-      lang: settingsRef.current.speechLang,
-      reply: true,
-      onInterim: (t) => {
-        showInterim(t);
-        setHasText(t.replace(/\s*\.\.\.$/, "").length > 0);
-      },
-      onFatal: () => {
-        // Cannot hear a reply: the buttons still work, and no reply means "yes" after a few seconds.
-        abortCapture();
-      },
-    });
-    if (!c) return;
-    capture.current = c;
-    c.begin();
-    const t0 = Date.now();
-    poll.current = setInterval(() => {
-      const cur = capture.current;
-      if (!cur || busy.current || statusRef.current !== "confirming") return;
-      if (cur.hasText()) {
-        if (!cur.isBusy() && cur.idleMs() > REPLY_IDLE_MS) void settleReply(myRun);
-      } else if (!cur.isBusy() && Date.now() - t0 > CONFIRM_WAIT_MS) {
-        // No reply. A full answer is taken as finished. A short one is probably not: the coach waits for more,
-        // quietly, and only takes it as finished the second time it has asked.
-        const enough = wordCount(pending.current?.text ?? "") >= ENOUGH_WORDS || confirmAsks.current >= 2;
-        if (enough) void decide("yes", "", undefined, myRun);
-        else {
-          abortCapture();
-          setPrompt("Take your time, I am listening.");
-          listen(myRun);
-        }
-      }
-    }, 250);
-  }
-
-  async function settleReply(myRun: number) {
-    const c = capture.current;
-    if (!c || busy.current) return;
-    busy.current = true;
-    stopPoll();
-    const res = await c.end();
-    if (myRun !== run.current) return;
-    c.dispose();
-    capture.current = null;
-    showInterim("");
-    setHasText(false);
-    busy.current = false;
-    const text = res.text.trim();
-    void decide(confirmIntent(text), text, res, myRun);
-  }
-
-  /** Acts on the student's reply to "Are you done?". */
-  async function decide(kind: ReturnType<typeof confirmIntent>, text: string, res: CaptureResult | undefined, myRun: number) {
-    if (myRun !== run.current || finished.current) return;
-    abortCapture();
-    if (kind === "end") return endBySpeech();
-    if (kind === "yes") return submitPending(myRun);
-    if (kind === "more") {
-      if (!(await speakAside(SAY_LISTENING, myRun))) return;
-      listen(myRun);
+  /** The "Next question" button (or the words "next question"): the answer so far is sent and the coach moves on. */
+  async function nextQuestion() {
+    if (finished.current || busy.current) return;
+    if (statusRef.current !== "listening" && statusRef.current !== "paused") return;
+    if (typedRef.current.trim()) {
+      submitTyped();
       return;
     }
-    // "Wait" or "let me think": the coach stays quiet and gives the student time.
-    if (text && commandIntent(text) === "hold") return holdOn(myRun);
-    // A question to the coach is answered at once. Anything longer than a few words that is not a command is more of the answer.
-    if (text && looksLikeQuestion(text)) {
-      addToPending(text, res);
-      return submitPending(myRun);
-    }
-    if (text && isContinuation(text)) {
-      addToPending(text, res);
-      void confirmTurn(myRun);
+    const myRun = run.current;
+    if (!capture.current) {
+      // Nothing is being listened to (typing only, or voice paused): move on with what was said before, or skip.
+      if (pending.current) submitPending(myRun, true);
+      else skipQuestion(myRun);
       return;
     }
-    unclearReplies.current += 1;
-    if (unclearReplies.current >= 2) return submitPending(myRun);
-    setStatusBoth("confirming");
-    if (!(await speakAside(ASK_AGAIN, myRun))) return;
-    listenForReply(myRun);
+    await endOfSpeech(myRun, true);
   }
 
   /** The student said they want to end the session. It ends at once, without another question. */
@@ -639,7 +536,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     coachEndedAt.current = Date.now();
     turnStartedAt.current = Date.now();
     setStatusBoth("listening");
-    setHasText(false);
     if (!voiceOkRef.current || engine.current === "none") return; // typed answers only
 
     // The accurate voice detector may have finished loading since the last turn.
@@ -647,10 +543,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     abortCapture();
     const c = createCapture(engine.current, inputsRef.current, module.id, {
       lang: settingsRef.current.speechLang,
-      verbatim: true,
       onInterim: (t) => {
         showInterim(t);
-        setHasText(t.replace(/\s*\.\.\.$/, "").length > 0);
         // Once the student is talking, "Go ahead, I'm listening." is no longer needed.
         if (t) setPrompt((p) => (p && /listening/i.test(p) ? null : p));
       },
@@ -687,37 +581,40 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       const cur = capture.current;
       if (!cur || busy.current || statusRef.current !== "listening") return;
       const sinceTurn = Date.now() - turnStartedAt.current;
+      const said = interimRef.current.replace(/\s*\.\.\.$/, "");
+      const idle = cur.idleMs();
+      const settled = !cur.isBusy();
+
       // The student said they want to end the session while talking: do it as soon as they pause.
-      if (interimRef.current && endIntent(interimRef.current) && cur.idleMs() > 700) {
+      if (said && endIntent(said) && idle > 700) {
         endBySpeech();
         return;
       }
-      // The student ended with "next question" or "that's all": move on as soon as they stop, without asking.
-      if (interimRef.current && nextCommand(interimRef.current) && cur.idleMs() > 700 && !cur.isBusy()) {
+      // "...next question" or "that's all" at the end: the answer is finished, so move on as soon as they stop.
+      if (said && nextCommand(said) && idle > 700 && settled) {
         void endOfSpeech(myRun, true);
         return;
       }
-      // "Wait" or "let me think" alone: answer at once, so the coach gives the student time without a long delay.
-      if (interimRef.current && commandIntent(interimRef.current) === "hold" && cur.idleMs() > 600 && !cur.isBusy()) {
-        void endOfSpeech(myRun, true);
+      // "Wait", "repeat the question" or "give me a hint" on their own: done at once, so there is no long delay.
+      if (said && commandIntent(said) && idle > COMMAND_WAIT_MS && settled) {
+        void endOfSpeech(myRun);
         return;
       }
+      // A question to the coach is answered on its own. One that ends with a question mark is clear; without it, wait longer.
+      if (said && looksLikeQuestion(said) && settled && idle > (/\?\s*$/.test(said) ? QUESTION_WAIT_MS : QUESTION_WAIT_PLAIN_MS)) {
+        void endOfSpeech(myRun);
+        return;
+      }
+
       if (cur.hasText()) {
-        // Never cut in while a part of the answer is still being transcribed.
-        // A sentence that stops in the middle ("... and the", "umm") means the student is still thinking.
-        const said = interimRef.current;
-        let wait = wordCount(said) < SHORT_ANSWER_WORDS ? DONE_CHECK_SHORT_MS : DONE_CHECK_MS;
-        if (endsUnfinished(said)) wait = Math.max(wait, DONE_CHECK_OPEN_MS);
-        if (patient.current) wait = Math.max(wait, DONE_CHECK_PATIENT_MS);
-        if ((!cur.isBusy() && cur.idleMs() > wait) || sinceTurn > MAX_ANSWER_MS) void endOfSpeech(myRun);
+        // The student has words on the screen. The coach waits: the student taps "Next question" (or says it) when finished.
+        setNudge(settled && idle > NUDGE_MS);
+        if (sinceTurn > MAX_ANSWER_MS && settled && idle > 1500) void endOfSpeech(myRun, true);
       } else if (cur.isBusy()) {
         // Speech was heard and is being transcribed: wait for the result.
-      } else if (cur.idleMs() > (patient.current ? PATIENT_SILENCE_MS : SILENCE_MS)) {
-        if (pending.current) {
-          // They said they had more to say, then said nothing: ask whether to move on.
-          abortCapture();
-          void confirmTurn(myRun);
-        } else handleSilence(myRun);
+      } else if (idle > (patient.current ? PATIENT_SILENCE_MS : SILENCE_MS)) {
+        // They said something earlier and then went quiet: keep waiting, the buttons are there. Otherwise gently offer help.
+        if (!pending.current) handleSilence(myRun);
       } else if (sinceTurn > 30_000) {
         // Sound was detected but nothing could be recognised.
         busy.current = true;
@@ -737,7 +634,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     silences.current = 0;
     degradedRef.current = false;
     pending.current = null;
-    askedDone.current = false;
     // State is overwritten by the next addTurn(), so no reset is needed if React re-runs this effect.
     turnsRef.current = [];
     void coachSay(openingMessage(module.id, profile.displayName), false, myRun);
@@ -769,9 +665,8 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       if (left > 0 || timeUp.current) return;
       timeUp.current = true;
       const st = statusRef.current;
-      if (st === "listening" || st === "paused" || st === "confirming") {
-        if (pending.current && st === "confirming") submitPending(run.current);
-        else if (capture.current?.hasText()) void endOfSpeech(run.current, true);
+      if (st === "listening" || st === "paused") {
+        if (capture.current?.hasText()) void endOfSpeech(run.current, true);
         else if (pending.current) submitPending(run.current);
         else if (typedRef.current.trim()) submitTyped();
         else finish();
@@ -828,7 +723,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     }
     busy.current = true;
     pending.current = null;
-    askedDone.current = false;
     abortCapture();
     setPrompt(null);
     addTurn({ role: "student", text: text.slice(0, 2000), inputMode: "typed" });
@@ -874,28 +768,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     listen(++run.current);
   }
 
-  /** "Yes, next question" button. */
-  function confirmYes() {
-    if (statusRef.current !== "confirming") return;
-    const myRun = ++run.current;
-    speech.current?.cancel();
-    speech.current = null;
-    stopSpeaking();
-    submitPending(myRun);
-  }
-
-  /** "I want to say more" button. */
-  function confirmMore() {
-    if (statusRef.current !== "confirming") return;
-    const myRun = ++run.current;
-    speech.current?.cancel();
-    speech.current = null;
-    stopSpeaking();
-    abortCapture();
-    setPrompt("I'm listening.");
-    listen(myRun);
-  }
-
   /** After a voice problem: switch voice back on and start listening again. */
   function tryVoiceAgain() {
     if (busy.current && statusRef.current === "thinking") return;
@@ -915,12 +787,11 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
     starting: "Getting ready...",
     coach: "Coach is speaking",
     listening: voiceOk ? "Your turn: speak now" : "Your turn: type your answer",
-    confirming: voiceOk ? "Say yes or no" : "Are you done?",
     thinking: "Coach is thinking...",
     paused: "Take your time",
   };
-  const live = status === "listening" || status === "confirming";
-  const orbColor = status === "listening" ? "bg-good" : status === "coach" || status === "confirming" ? "bg-accent" : "bg-muted";
+  const live = status === "listening";
+  const orbColor = status === "listening" ? "bg-good" : status === "coach" ? "bg-accent" : "bg-muted";
   const studentCount = turns.filter((t) => t.role === "student").length;
 
   return (
@@ -991,7 +862,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
       <div className="rounded-card border border-line bg-surface p-6 text-center shadow-card md:p-9">
         <div className="mx-auto grid h-28 w-28 place-items-center">
           <span className={`relative grid h-20 w-20 place-items-center rounded-full ${orbColor} text-white shadow-lift`} aria-hidden>
-            {(status === "coach" || status === "listening" || status === "confirming") && (
+            {(status === "coach" || status === "listening") && (
               <>
                 <span className={`orb-ring absolute -inset-2 rounded-full ${orbColor}`} />
                 <span className={`orb-ring orb-ring-2 absolute -inset-5 rounded-full ${orbColor}`} />
@@ -1002,8 +873,6 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
                 <Microphone size={34} weight="fill" />
               ) : status === "coach" ? (
                 <SpeakerHigh size={34} weight="fill" />
-              ) : status === "confirming" ? (
-                <Question size={34} weight="fill" />
               ) : status === "paused" ? (
                 <Pause size={34} weight="fill" />
               ) : (
@@ -1014,7 +883,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
         </div>
         <p
           className={`mx-auto mt-3 inline-flex items-center rounded-full px-3 py-1 text-sm font-bold ${
-            status === "listening" ? "bg-good-soft text-good" : status === "coach" || status === "confirming" ? "bg-accent-soft text-accent-ink" : "bg-paper text-muted"
+            status === "listening" ? "bg-good-soft text-good" : status === "coach" ? "bg-accent-soft text-accent-ink" : "bg-paper text-muted"
           }`}
           role="status"
         >
@@ -1049,29 +918,27 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
             <p className="mt-3 min-h-14 rounded-[1.6rem_1.6rem_0.4rem_1.6rem] bg-ink px-5 py-3.5 text-[1.02rem] leading-relaxed text-paper" data-testid="live-transcript">
               {interim || <span className="text-paper/70">Listening for your voice...</span>}
             </p>
+            <p className="mt-2 text-sm font-semibold text-muted" data-testid="next-hint">
+              {nudge ? "Finished? Tap Next question." : "Say your answer. When you have finished, tap Next question, or say \"next question\"."}
+            </p>
           </div>
         )}
       </div>
 
       <div className="flex flex-wrap gap-2.5">
-        {status === "listening" && voiceOk && hasText && (
-          <Button size="lg" className="w-full sm:w-auto" icon={<CheckCircle size={20} weight="fill" aria-hidden />} onClick={() => void endOfSpeech(run.current, true)}>
-            I&apos;m done speaking
+        {(status === "listening" || status === "paused") && (
+          <Button
+            size="lg"
+            className={`w-full sm:w-auto ${nudge ? "animate-pulse ring-4 ring-good/40" : ""}`}
+            icon={<CheckCircle size={20} weight="fill" aria-hidden />}
+            onClick={() => void nextQuestion()}
+          >
+            Next question
           </Button>
         )}
-        {status === "confirming" && (
-          <>
-            <Button size="lg" icon={<CheckCircle size={20} weight="fill" aria-hidden />} onClick={confirmYes}>
-              Yes, next question
-            </Button>
-            <Button size="lg" variant="secondary" icon={<Microphone size={20} weight="fill" aria-hidden />} onClick={confirmMore}>
-              I want to say more
-            </Button>
-          </>
-        )}
         {status === "paused" && (
-          <Button size="lg" onClick={resumeFromPause}>
-            I&apos;m ready
+          <Button size="lg" variant="secondary" onClick={resumeFromPause}>
+            I&apos;m ready, listen again
           </Button>
         )}
         {status === "coach" && (
@@ -1083,7 +950,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
           variant="secondary"
           icon={<ArrowCounterClockwise size={18} aria-hidden />}
           onClick={repeatQuestion}
-          disabled={status === "thinking" || status === "starting" || status === "confirming"}
+          disabled={status === "thinking" || status === "starting"}
         >
           Repeat the question
         </Button>
@@ -1091,7 +958,7 @@ export function ConversationPhase({ module, profile, goal, settings, stream, vad
           variant="secondary"
           icon={<Lightbulb size={18} aria-hidden />}
           onClick={needHint}
-          disabled={status === "thinking" || status === "starting" || status === "coach" || status === "confirming"}
+          disabled={status === "thinking" || status === "starting" || status === "coach"}
         >
           I need a hint
         </Button>

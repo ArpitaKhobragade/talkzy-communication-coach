@@ -37,25 +37,51 @@ const NUMBER_WORDS = new Set(
   "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand lakh crore first second third".split(" "),
 );
 
-/** Longest-common-subsequence match between passage words and recognised words: pairs of [passage index, spoken index]. */
+/** Leaving out a passage word costs this much, and a matched word earns 1, so a few chance matches far ahead never win over a steady reading. */
+const SKIP_PASSAGE_COST = 0.2;
+/** An extra spoken word ("umm", a repeated word, a word the recogniser added) costs very little. */
+const SKIP_SPOKEN_COST = 0.05;
+
+/**
+ * Lines the recognised words up with the passage: pairs of [passage index, spoken index], in order. Matches earn a point and
+ * skipped words cost a little, so a student who starts further into the passage, or jumps over a sentence, is still lined up,
+ * but two or three common words ("a", "that") far ahead are not taken for a reading. The end of the passage is free: a student
+ * may stop early.
+ */
 function lcsPairs(passage: string[], spoken: string[]): [number, number][] {
   const n = passage.length;
   const m = spoken.length;
-  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  const w = m + 1;
+  const dp = new Float64Array((n + 1) * w);
+  for (let i = 1; i <= n; i++) dp[i * w] = -i * SKIP_PASSAGE_COST;
+  for (let j = 1; j <= m; j++) dp[j] = -j * SKIP_SPOKEN_COST;
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
-      dp[i][j] = passage[i - 1] === spoken[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      const diag = passage[i - 1] === spoken[j - 1] ? dp[(i - 1) * w + j - 1] + 1 : -Infinity;
+      const up = dp[(i - 1) * w + j] - SKIP_PASSAGE_COST;
+      const left = dp[i * w + j - 1] - SKIP_SPOKEN_COST;
+      dp[i * w + j] = Math.max(diag, up, left);
+    }
+  }
+  // Where the reading ended: the row with the best score once every spoken word is used.
+  let i = 0;
+  let best = -Infinity;
+  for (let r = 0; r <= n; r++) {
+    if (dp[r * w + m] > best + 1e-9) {
+      best = dp[r * w + m];
+      i = r;
     }
   }
   const pairs: [number, number][] = [];
-  let i = n;
   let j = m;
+  const same = (x: number, y: number) => Math.abs(x - y) < 1e-9;
   while (i > 0 && j > 0) {
-    if (passage[i - 1] === spoken[j - 1]) {
+    const here = dp[i * w + j];
+    if (passage[i - 1] === spoken[j - 1] && same(here, dp[(i - 1) * w + j - 1] + 1)) {
       pairs.push([i - 1, j - 1]);
       i--;
       j--;
-    } else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+    } else if (same(here, dp[(i - 1) * w + j] - SKIP_PASSAGE_COST)) i--;
     else j--;
   }
   return pairs.reverse();

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activeProvider, generate, isLiveMode } from "@/features/coach/server/llm";
-import { synthesizeSpeech, transcribeSegment } from "@/features/coach/server/voice";
+import { hasIndicScript, resetVoiceCoolOff, synthesizeSarvam, synthesizeSpeech, transcribeSegment } from "@/features/coach/server/voice";
 import { POST as sttPost } from "@/app/api/voice/stt/route";
 import { GET as ttsCheck, POST as ttsPost } from "@/app/api/voice/tts/route";
 import { GET as statusGet } from "@/app/api/status/route";
@@ -9,6 +9,7 @@ import { GET as statusGet } from "@/app/api/status/route";
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
+  resetVoiceCoolOff();
   vi.stubGlobal("fetch", fetchMock);
   for (const k of ["GROQ_API_KEY", "ANTHROPIC_API_KEY", "LLM_PROVIDER", "SARVAM_API_KEY", "CARTESIA_API_KEY", "CARTESIA_VOICE_ID", "SARVAM_STT_MODEL"]) {
     vi.stubEnv(k, "");
@@ -126,8 +127,16 @@ describe("Sarvam speech-to-text", () => {
     expect(form.has("model")).toBe(false); // service default unless SARVAM_STT_MODEL is set
   });
 
-  it("asks for word-for-word text (with umm and haa) for a spoken answer, and falls back to the normal text if that is refused", async () => {
+  it("does NOT ask for word-for-word text by default: that mode writes English in Hindi letters", async () => {
     vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    fetchMock.mockResolvedValue(json({ transcript: "umm a program is a list" }));
+    await transcribeSegment(new Uint8Array(2000).buffer, [], { verbatim: true });
+    expect((fetchMock.mock.calls[0][1].body as FormData).has("mode")).toBe(false);
+  });
+
+  it("asks for word-for-word text only when SARVAM_VERBATIM=on, and falls back to the normal text if that is refused", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    vi.stubEnv("SARVAM_VERBATIM", "on");
     fetchMock.mockResolvedValueOnce(json({ transcript: "umm a program is haa a list" }));
     expect(await transcribeSegment(new Uint8Array(2000).buffer, ["debugging"], { verbatim: true })).toBe("umm a program is haa a list");
     const form = fetchMock.mock.calls[0][1].body as FormData;
@@ -143,12 +152,19 @@ describe("Sarvam speech-to-text", () => {
     expect(second.get("keyterms")).toBe(JSON.stringify(["debugging"]));
   });
 
-  it("does not ask for word-for-word text when SARVAM_VERBATIM is off", async () => {
+  it("never returns Hindi letters: it asks again for Roman letters, and returns nothing if that does not help", async () => {
     vi.stubEnv("SARVAM_API_KEY", "sv-test");
-    vi.stubEnv("SARVAM_VERBATIM", "off");
-    fetchMock.mockResolvedValue(json({ transcript: "ok" }));
-    await transcribeSegment(new Uint8Array(2000).buffer, [], { verbatim: true });
-    expect((fetchMock.mock.calls[0][1].body as FormData).has("mode")).toBe(false);
+    expect(hasIndicScript("द इलेक्ट्रिसिटी बेल")).toBe(true);
+    expect(hasIndicScript("the electricity bill")).toBe(false);
+
+    fetchMock.mockResolvedValueOnce(json({ transcript: "द इलेक्ट्रिसिटी बेल गेट रिड्यूस्ड" })).mockResolvedValueOnce(json({ transcript: "the electricity bill gets reduced" }));
+    expect(await transcribeSegment(new Uint8Array(2000).buffer, [])).toBe("the electricity bill gets reduced");
+    const again = fetchMock.mock.calls[1][1].body as FormData;
+    expect(again.get("mode")).toBe("translit");
+
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => json({ transcript: "द इलेक्ट्रिसिटी बेल" }));
+    expect(await transcribeSegment(new Uint8Array(2000).buffer, [])).toBe("");
   });
 
   it("retries once without key terms if Sarvam rejects the optional field", async () => {
@@ -182,6 +198,19 @@ describe("Cartesia text-to-speech", () => {
   });
 });
 
+describe("Sarvam text-to-speech (the backup voice)", () => {
+  it("asks for an English MP3 and returns the audio bytes", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    fetchMock.mockResolvedValue(json({ audios: [Buffer.from([1, 2, 3, 4]).toString("base64")] }));
+    const audio = await synthesizeSarvam("Hello student", 1.1);
+    expect(new Uint8Array(audio)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.sarvam.ai/text-to-speech");
+    expect(init.headers["api-subscription-key"]).toBe("sv-test");
+    expect(JSON.parse(init.body)).toMatchObject({ text: "Hello student", language_code: "en-IN", output_audio_codec: "mp3", pace: 1.1 });
+  });
+});
+
 describe("POST /api/voice/stt", () => {
   it("is a clean 501 when Sarvam is not configured", async () => {
     expect((await sttPost(sttRequest())).status).toBe(501);
@@ -209,6 +238,28 @@ describe("POST /api/voice/stt", () => {
     expect(JSON.stringify(await res.json())).not.toMatch(/secret/);
   });
 
+  it("gives live words (interim=1) only part of the speech service's quota, and never holds back a real transcript", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    fetchMock.mockImplementation(async () => json({ transcript: "hello" }));
+    const partial = () => sttPost(sttRequest({ url: "http://localhost/api/voice/stt?module=x&interim=1" }));
+    let limited = 0;
+    for (let i = 0; i < 40; i++) if ((await partial()).status === 429) limited++;
+    expect(limited).toBeGreaterThan(0);
+    // The live words were marked as such for the speech service, and a real transcript still goes through.
+    expect(fetchMock.mock.calls[0][1].headers["x-talkzy-purpose"]).toBe("partial");
+    const calls = fetchMock.mock.calls.length;
+    expect((await sttPost(sttRequest())).status).toBe(200);
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+    expect(fetchMock.mock.calls.at(-1)?.[1].headers["x-talkzy-purpose"]).toBeUndefined();
+  });
+
+  it("asks once more when a real transcript is refused with 'too many requests'", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-test");
+    fetchMock.mockResolvedValueOnce(json({ error: "slow down" }, 429)).mockResolvedValueOnce(json({ transcript: "it worked" }));
+    expect(await transcribeSegment(new Uint8Array(2000).buffer, [])).toBe("it worked");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 10_000);
+
   it("allows same-origin browser requests", async () => {
     vi.stubEnv("SARVAM_API_KEY", "sv-test");
     fetchMock.mockResolvedValue(json({ transcript: "ok" }));
@@ -218,9 +269,36 @@ describe("POST /api/voice/stt", () => {
 });
 
 describe("POST /api/voice/tts", () => {
-  it("is a clean 501 until both the Cartesia key and voice ID are set", async () => {
+  it("is a clean 501 until a voice is set up: Cartesia needs its key and voice ID, or the Sarvam key is used", async () => {
     vi.stubEnv("CARTESIA_API_KEY", "sk");
     expect((await ttsPost(ttsRequest({ text: "hi" }))).status).toBe(501);
+  });
+
+  it("uses Sarvam's voice when Cartesia has no credit, and stops asking Cartesia for a while", async () => {
+    vi.stubEnv("CARTESIA_API_KEY", "sk");
+    vi.stubEnv("CARTESIA_VOICE_ID", "v");
+    vi.stubEnv("SARVAM_API_KEY", "sv");
+    const sarvamAudio = json({ audios: [Buffer.from([5, 6, 7]).toString("base64")] });
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes("cartesia") ? new Response(JSON.stringify({ error_code: "quota_exceeded", message: "This request requires approximately 119 credits but you have 8 remaining." }), { status: 402 }) : sarvamAudio.clone(),
+    );
+    const first = await ttsPost(ttsRequest({ text: "Hello" }));
+    expect(first.status).toBe(200);
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(new Uint8Array([5, 6, 7]));
+    const cartesiaCalls = () => fetchMock.mock.calls.filter(([u]) => String(u).includes("cartesia")).length;
+    expect(cartesiaCalls()).toBe(1);
+
+    // The next message goes straight to Sarvam: nothing waits for the service that is down.
+    expect((await ttsPost(ttsRequest({ text: "Again" }))).status).toBe(200);
+    expect(cartesiaCalls()).toBe(1);
+  });
+
+  it("works with only the Sarvam key", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv");
+    fetchMock.mockResolvedValue(json({ audios: [Buffer.from([1, 1]).toString("base64")] }));
+    const res = await ttsPost(ttsRequest({ text: "Hello" }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/mpeg");
   });
 
   it("streams MP3 back and validates input", async () => {
@@ -255,7 +333,7 @@ describe("GET /api/voice/tts?check=1 (the voice check)", () => {
     vi.stubEnv("CARTESIA_API_KEY", "sk");
     vi.stubEnv("CARTESIA_VOICE_ID", "v");
     fetchMock.mockResolvedValue(new Response(new Uint8Array([9, 9, 9]), { status: 200 }));
-    expect(await (await check()).json()).toEqual({ ok: true, hint: "The studio voice is working." });
+    expect(await (await check()).json()).toEqual({ ok: true, via: "cartesia", hint: "The studio voice is working." });
   });
 
   it("says why it fails, without showing the key", async () => {
@@ -289,6 +367,11 @@ describe("GET /api/voice/tts?check=1 (the voice check)", () => {
 });
 
 describe("GET /api/status", () => {
+  it("says a cloud voice is available when only the Sarvam key is set", async () => {
+    vi.stubEnv("SARVAM_API_KEY", "sv-secret");
+    expect(await (await statusGet()).json()).toEqual({ mode: "dev", llm: null, stt: "sarvam", tts: "cartesia" });
+  });
+
   it("reports only service names, never keys", async () => {
     expect(await (await statusGet()).json()).toEqual({ mode: "dev", llm: null, stt: "browser", tts: "browser" });
     vi.stubEnv("GROQ_API_KEY", "gsk-secret");
