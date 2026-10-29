@@ -1,0 +1,489 @@
+// Browser-only. Captures ONE spoken answer with Silero VAD + Sarvam speech-to-text.
+// The words must show up while the student is still speaking, so three things work together:
+//  1. While speech is going on, the audio heard so far is sent for quick words (Groq Whisper, about twice a second; Sarvam, slower, as a backup)
+//     and the words are shown at once ("partial" words). Quick words also stay on the screen for each piece until its accurate text arrives.
+//  2. A long stretch of speech is cut at a natural pause every few seconds and each piece is transcribed on its own, so the
+//     partial words never have to cover a whole minute of audio.
+//  3. When the browser has its own recogniser (Chrome, Edge), its words are shown too, and the longer text wins.
+// What is saved and measured is always the accurate transcript from Sarvam, never the partial words.
+// Half-duplex: call begin() only after the coach has finished speaking.
+import type { CaptureResult, TurnCaptureLike, TurnCaptureOptions } from "./capture";
+import { SpeechRecognizer, recognitionSupported } from "./recognition";
+import { encodeWav16, splitForStt, STT_SAMPLE_RATE, timingFromSpans, type SpeechSpan } from "./segments";
+import { REDEMPTION_MS, type VadSegment, type VadSession } from "./vad-session";
+
+const MIN_PIECE_SAMPLES = Math.round(0.3 * STT_SAMPLE_RATE);
+const STT_TIMEOUT_MS = 20_000;
+/** Give up on the flushed final segment after this long when ending an answer. */
+const END_WAIT_MS = 15_000;
+/** Two failed segments in a row means cloud recognition is not working right now. */
+const MAX_CONSECUTIVE_FAILURES = 2;
+/**
+ * Failed segments in a row, counted across turns: a new capture starts for every question, so a count kept
+ * inside one capture would start again at zero after each "say that again" and trouble would never be reported.
+ */
+let failureStreak = 0;
+
+/** One audio frame from the voice detector is 512 samples (32 ms). */
+const FRAME_SEC = 512 / STT_SAMPLE_RATE;
+/** Frames kept from just before speech starts, so the first word is not cut off (about 0.45 s). */
+const PREROLL_FRAMES = 14;
+/**
+ * The first partial words are sent once this much speech has been heard, and then this often. The speech service allows only
+ * 60 requests a minute for the whole account on the entry plan, so this is kept gentle, and it backs off when a request fails.
+ */
+const PARTIAL_FIRST_SEC = 0.3;
+/** How often the live words are asked for: the fast service (Groq) can be asked often, the entry plan of the other one cannot. */
+const PARTIAL_FAST_MS = 450;
+/** A second request may be sent while the first is still on its way if it has been this long, so one slow answer never stalls the words. */
+const PARTIAL_OVERLAP_MS = 900;
+const PARTIAL_SLOW_MS = 1300;
+const PARTIAL_TIMEOUT_MS = 8_000;
+const PARTIAL_BACKOFF_MS = 1500;
+const PARTIAL_BACKOFF_MAX_MS = 12_000;
+/** The browser's own live words are working when they changed this recently. Then partial words are not requested at all. */
+const LIVE_FRESH_MS = 2500;
+/** A stretch of speech this long is cut at its quietest moment and the first part is transcribed on its own. */
+const CHUNK_AT_SEC = 4.5;
+/** The cut is never made earlier than this into the stretch. */
+const CHUNK_MIN_SEC = 2;
+/** A frame this quiet (speech probability) is a good place to cut. Without one, the cut waits until the stretch is this long. */
+const CHUNK_QUIET = 0.55;
+const CHUNK_FORCE_SEC = 7;
+
+const wordsIn = (t: string) => (t ? t.split(/\s+/).filter(Boolean).length : 0);
+const noDots = (t: string) => t.replace(/\s*\.\.\.$/, "");
+
+function join(frames: Float32Array[]): Float32Array {
+  const out = new Float32Array(frames.reduce((n, f) => n + f.length, 0));
+  let at = 0;
+  for (const f of frames) {
+    out.set(f, at);
+    at += f.length;
+  }
+  return out;
+}
+
+/** The audio at half the sample rate: each pair of samples is averaged into one. */
+function halve(audio: Float32Array): Float32Array {
+  const out = new Float32Array(audio.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = (audio[2 * i] + audio[2 * i + 1]) / 2;
+  return out;
+}
+
+async function transcribe(audio: Float32Array, moduleId: string, reply: boolean, verbatim: boolean): Promise<string> {
+  const texts: string[] = [];
+  for (const piece of splitForStt(audio)) {
+    if (piece.length < MIN_PIECE_SAMPLES) continue;
+    const res = await fetch(`/api/voice/stt?module=${encodeURIComponent(moduleId)}${reply ? "&reply=1" : ""}${verbatim ? "&answer=1" : ""}`, {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: encodeWav16(piece),
+      signal: AbortSignal.timeout(STT_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`stt_${res.status}`);
+    const data = (await res.json()) as { text?: string };
+    if (data.text) texts.push(data.text.trim());
+  }
+  return texts.join(" ").trim();
+}
+
+/** The words of audio that is still being spoken. Failing is fine: it only affects what is shown for a moment. `fast` is true when the quick service answered. */
+async function transcribePartial(audio: Float32Array, moduleId: string, reply: boolean): Promise<{ text: string; fast: boolean }> {
+  const res = await fetch(`/api/voice/stt?module=${encodeURIComponent(moduleId)}${reply ? "&reply=1" : ""}&interim=1`, {
+    method: "POST",
+    headers: { "content-type": "audio/wav" },
+    // Quick words need less detail than the saved transcript: half the sample rate means half the bytes to upload, which matters on a phone network.
+    body: encodeWav16(halve(audio), STT_SAMPLE_RATE / 2),
+    signal: AbortSignal.timeout(PARTIAL_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`stt_${res.status}`);
+  const data = (await res.json()) as { text?: string; fast?: boolean };
+  return { text: (data.text ?? "").trim(), fast: data.fast === true };
+}
+
+export class CloudTurnCapture implements TurnCaptureLike {
+  private spans: SpeechSpan[] = [];
+  private parts: string[] = [];
+  /** Quick words for each piece, shown until its accurate transcript arrives, so the screen never waits on the slower service. */
+  private previews: string[] = [];
+  /** Pieces whose accurate transcript has come back (or failed). */
+  private settled = new Set<number>();
+  private partialEvery = PARTIAL_FAST_MS;
+  private pending = 0;
+  private speaking = false;
+  private lastActivity = 0;
+  private turnStart = 0;
+  private failures = 0;
+  private fatalRaised = false;
+  private live: SpeechRecognizer | null = null;
+  private liveFinals: string[] = [];
+  private liveInterim = "";
+  /** Audio of the speech going on right now, not yet sent for its accurate transcript. */
+  private frames: Float32Array[] = [];
+  private probs: number[] = [];
+  private preroll: Float32Array[] = [];
+  /** Changes whenever the audio buffer is reset, so partial words for old audio are dropped when they arrive. */
+  private bufferVersion = 0;
+  private partial = "";
+  /** Quick-word requests on their way, and the order they were sent in (an older answer never replaces a newer one). */
+  private partialInFlight = 0;
+  private partialSeq = 0;
+  private partialApplied = 0;
+  private lastPartialAt = 0;
+  private partialFailures = 0;
+  private partialPausedUntil = 0;
+  /** When the browser's own live words last changed. */
+  private liveAt = 0;
+  /** Part of this stretch of speech has already been sent as its own piece. */
+  private chunked = false;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  /** What is on the screen now. It does not get shorter while words are still arriving, so the text never jumps back. */
+  private shown = "";
+  active = false;
+
+  constructor(
+    private readonly vad: VadSession,
+    private readonly moduleId: string,
+    private readonly opts: TurnCaptureOptions,
+  ) {}
+
+  get isActive(): boolean {
+    return this.active;
+  }
+
+  begin(): void {
+    this.spans = [];
+    this.parts = [];
+    this.previews = [];
+    this.settled = new Set();
+    this.partialEvery = PARTIAL_FAST_MS;
+    this.pending = 0;
+    this.speaking = false;
+    // Failures are not reset here: if the speech service failed on the last turn, one more failure is enough to say so.
+    // A successful transcription resets the count.
+    this.fatalRaised = false;
+    this.liveFinals = [];
+    this.liveInterim = "";
+    this.frames = [];
+    this.probs = [];
+    this.preroll = [];
+    this.bufferVersion++;
+    this.partial = "";
+    this.partialInFlight = 0;
+    this.partialFailures = 0;
+    this.partialPausedUntil = 0;
+    this.liveAt = 0;
+    this.chunked = false;
+    this.shown = "";
+    this.active = true;
+    this.turnStart = performance.now();
+    this.lastActivity = this.turnStart;
+    // The student may already be talking (they interrupted the coach), so their words are kept from the start.
+    this.speaking = this.vad.isSpeaking;
+
+    this.vad.setListener({
+      onSpeechStart: () => this.handleStart(),
+      onSegment: (seg) => this.handleSegment(seg),
+      onMisfire: () => this.handleMisfire(),
+      onLevel: (p) => this.opts.onLevel?.(p),
+      onFrame: (frame, p) => this.handleFrame(frame, p),
+    });
+    this.vad.start().catch(() => {
+      this.active = false;
+      this.opts.onFatal("vad");
+    });
+    this.startLive();
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = setInterval(() => this.tick(), 100);
+  }
+
+  /** Live words from the browser's own recogniser, when it has one. Any problem here is ignored: it only affects the display. */
+  private startLive() {
+    this.live?.abort();
+    this.live = null;
+    if (!recognitionSupported()) return;
+    const rec = new SpeechRecognizer(this.opts.lang, {
+      onInterim: (text) => {
+        this.liveInterim = text;
+        if (text) this.liveAt = performance.now();
+        this.emitInterim();
+      },
+      onFinal: (text) => {
+        if (text) {
+          this.liveFinals.push(text);
+          this.liveAt = performance.now();
+        }
+        this.liveInterim = "";
+        this.emitInterim();
+      },
+      onFatal: () => {
+        // The browser's recogniser is unavailable or blocked. The partial words from Sarvam carry on without it.
+        if (this.live === rec) this.live = null;
+      },
+    });
+    this.live = rec;
+    rec.start();
+  }
+
+  /** Everything the browser's recogniser has heard in this answer so far. */
+  private liveText(): string {
+    return [...this.liveFinals, this.liveInterim].filter(Boolean).join(" ").trim();
+  }
+
+  /**
+   * What the student sees, as quickly as possible: the accurate words so far, then the partial words of what is being said now.
+   * If the browser's live words are longer, those are shown instead. The text is never shortened while words are still arriving.
+   */
+  private displayText(): string {
+    const done = this.parts.map((p, i) => p || this.previews[i] || "").filter(Boolean).join(" ").trim();
+    let text = [done, this.partial].filter(Boolean).join(" ");
+    const live = this.liveText();
+    if (live && wordsIn(live) > wordsIn(text)) text = live;
+    if ((this.speaking || this.pending > 0) && !text) return "...";
+    if (this.speaking && !this.partial && !live && text) return `${text} ...`;
+    return text;
+  }
+
+  private emitInterim() {
+    if (!this.active) return;
+    let text = this.displayText();
+    const arriving = this.speaking || this.pending > 0 || this.partialInFlight > 0;
+    if (arriving && wordsIn(noDots(text)) < wordsIn(noDots(this.shown))) text = this.shown;
+    this.shown = text;
+    this.opts.onInterim(text);
+  }
+
+  private handleStart() {
+    this.speaking = true;
+    this.lastActivity = performance.now();
+    // The audio of this stretch of speech starts a little before the detector noticed it.
+    this.frames = this.preroll;
+    this.probs = this.frames.map(() => 1);
+    this.preroll = [];
+    this.partial = "";
+    this.chunked = false;
+    this.bufferVersion++;
+    // The first request goes out as soon as there is enough speech, not a whole interval later.
+    this.lastPartialAt = performance.now() - this.partialEvery;
+    this.emitInterim();
+  }
+
+  private handleFrame(frame: Float32Array, probability: number) {
+    if (!this.active) return;
+    if (this.speaking) {
+      this.frames.push(frame);
+      this.probs.push(probability);
+    } else {
+      this.preroll.push(frame);
+      if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
+    }
+  }
+
+  /** Every tenth of a second: cut a long stretch of speech into a piece, or send the audio heard so far for partial words. */
+  private tick() {
+    if (!this.active || !this.speaking) return;
+    const sec = this.frames.length * FRAME_SEC;
+    if (sec >= CHUNK_AT_SEC && this.cutChunk(sec)) return;
+    const now = performance.now();
+    // The browser's own live words are free and instant, so while they are flowing nothing is asked of the speech service.
+    const liveFlowing = now - this.liveAt < LIVE_FRESH_MS;
+    const free = this.partialInFlight === 0 || (this.partialInFlight === 1 && this.partialEvery === PARTIAL_FAST_MS && now - this.lastPartialAt >= PARTIAL_OVERLAP_MS);
+    if (free && !liveFlowing && sec >= PARTIAL_FIRST_SEC && now - this.lastPartialAt >= this.partialEvery && now >= this.partialPausedUntil) this.requestPartial();
+  }
+
+  /** Sends the first part of a long stretch of speech, cut where the voice is quietest, as its own piece. */
+  private cutChunk(sec: number): boolean {
+    const from = Math.floor(CHUNK_MIN_SEC / FRAME_SEC);
+    let cut = -1;
+    let quietest = 2;
+    for (let i = from; i < this.frames.length - 1; i++) {
+      if (this.probs[i] < quietest) {
+        quietest = this.probs[i];
+        cut = i;
+      }
+    }
+    if (cut < 0 || (quietest > CHUNK_QUIET && sec < CHUNK_FORCE_SEC)) return false;
+    const audio = join(this.frames.slice(0, cut + 1));
+    this.frames = this.frames.slice(cut + 1);
+    this.probs = this.probs.slice(cut + 1);
+    this.chunked = true;
+    this.partial = "";
+    this.bufferVersion++;
+    const index = this.startPart(audio);
+    this.previewPart(index, audio);
+    return true;
+  }
+
+  private requestPartial() {
+    const audio = join(this.frames);
+    if (audio.length < MIN_PIECE_SAMPLES) return;
+    const version = this.bufferVersion;
+    const seq = ++this.partialSeq;
+    this.partialInFlight++;
+    this.lastPartialAt = performance.now();
+    transcribePartial(audio, this.moduleId, !!this.opts.reply)
+      .then(({ text, fast }) => {
+        this.partialFailures = 0;
+        this.partialEvery = fast ? PARTIAL_FAST_MS : PARTIAL_SLOW_MS;
+        if (this.active && version === this.bufferVersion && text && seq > this.partialApplied) {
+          this.partialApplied = seq;
+          this.partial = text;
+          this.emitInterim();
+        }
+      })
+      .catch(() => {
+        // Too many requests or a hiccup: wait longer before the next one, so the final transcripts are never starved.
+        this.partialFailures++;
+        this.partialPausedUntil = performance.now() + Math.min(PARTIAL_BACKOFF_MAX_MS, PARTIAL_BACKOFF_MS * 2 ** this.partialFailures);
+      })
+      .finally(() => {
+        this.partialInFlight--;
+      });
+  }
+
+  /** A sound too short for the voice detector to call speech. In a reply to "Are you done?" it is kept: it may be a short "yes". */
+  private handleMisfire() {
+    const audio = join(this.frames);
+    this.speaking = false;
+    this.lastActivity = performance.now() - REDEMPTION_MS;
+    this.frames = [];
+    this.probs = [];
+    this.chunked = false;
+    this.partial = "";
+    this.bufferVersion++;
+    if (this.opts.reply && audio.length >= MIN_PIECE_SAMPLES) {
+      const index = this.startPart(audio);
+      this.previewPart(index, audio);
+    }
+    this.emitInterim();
+  }
+
+  private handleSegment(seg: VadSegment) {
+    this.speaking = false;
+    // Quiet is counted from when the student really stopped, not from when the detector noticed (a second later) or the words arrived.
+    this.lastActivity = seg.endMs;
+    this.spans.push({ startMs: seg.startMs, endMs: seg.endMs });
+
+    // If part of this stretch was already sent as its own piece, only what is left is sent now.
+    const audio = this.chunked ? join(this.frames) : seg.audio;
+    const preview = this.partial;
+    this.frames = [];
+    this.probs = [];
+    this.chunked = false;
+    this.partial = "";
+    this.bufferVersion++;
+    const index = this.startPart(audio);
+    // The quick words of this stretch stay on the screen until its accurate transcript arrives.
+    this.previews[index] = preview;
+    this.emitInterim();
+  }
+
+  /** Quick words for a piece that was cut off a long stretch of speech, shown until its accurate transcript arrives. */
+  private previewPart(index: number, audio: Float32Array) {
+    transcribePartial(audio, this.moduleId, !!this.opts.reply)
+      .then(({ text }) => {
+        if (!this.active || !text || this.settled.has(index)) return;
+        this.previews[index] = text;
+        this.emitInterim();
+      })
+      .catch(() => undefined);
+  }
+
+  /** Sends one piece of audio for its accurate transcript. The text is added in order, whenever it arrives. Returns the piece's place in the answer. */
+  private startPart(audio: Float32Array): number {
+    const index = this.parts.length;
+    this.parts.push("");
+    this.previews.push("");
+    this.pending++;
+
+    const run = async () => {
+      try {
+        return await transcribe(audio, this.moduleId, !!this.opts.reply, !!this.opts.verbatim);
+      } catch {
+        return await transcribe(audio, this.moduleId, !!this.opts.reply, !!this.opts.verbatim); // one retry for a transient failure
+      }
+    };
+    run()
+      .then((text) => {
+        this.parts[index] = text;
+        this.failures = 0;
+        failureStreak = 0;
+      })
+      .catch(() => {
+        this.failures++;
+        failureStreak++;
+        if (failureStreak >= MAX_CONSECUTIVE_FAILURES && !this.fatalRaised) {
+          this.fatalRaised = true;
+          failureStreak = 0;
+          this.opts.onFatal("cloud-stt");
+        }
+      })
+      .finally(() => {
+        this.pending--;
+        this.settled.add(index);
+        // The accurate words replace the quick ones (or nothing, if no words were heard).
+        if (this.parts[index]) this.previews[index] = "";
+        this.emitInterim();
+      });
+    return index;
+  }
+
+  currentText(): string {
+    return this.parts.filter(Boolean).join(" ").trim();
+  }
+
+  /** The best words available when the accurate transcript has nothing: the browser's live words, or the partial words. */
+  private fallbackText(): string {
+    const live = this.liveText();
+    return wordsIn(live) >= wordsIn(this.partial) ? live : this.partial;
+  }
+
+  hasText(): boolean {
+    return this.currentText().length > 0 || this.fallbackText().length > 0;
+  }
+
+  idleMs(): number {
+    return this.speaking ? 0 : performance.now() - this.lastActivity;
+  }
+
+  isBusy(): boolean {
+    return this.pending > 0;
+  }
+
+  private stopTicker() {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+  }
+
+  async end(): Promise<CaptureResult> {
+    try {
+      await this.vad.pause(); // flushes speech that is still in progress
+    } catch {
+      /* ignore */
+    }
+    // The flushed segment can arrive just after pause() resolves, so keep listening briefly.
+    await new Promise((r) => setTimeout(r, 200));
+    this.vad.setListener(null);
+    this.stopTicker();
+    const deadline = performance.now() + END_WAIT_MS;
+    while (this.pending > 0 && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    this.active = false;
+    const text = this.currentText() || this.fallbackText();
+    this.stopLive();
+    return { text, confidence: null, timing: timingFromSpans(this.spans, this.turnStart) };
+  }
+
+  private stopLive() {
+    this.live?.abort();
+    this.live = null;
+  }
+
+  dispose(): void {
+    this.active = false;
+    this.stopTicker();
+    this.stopLive();
+    this.vad.setListener(null);
+    void this.vad.pause().catch(() => undefined);
+  }
+}
